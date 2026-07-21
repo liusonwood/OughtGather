@@ -407,6 +407,36 @@ class ContentProcessor:
         Returns:
             str: 清洗后的 HTML 片段
         """
+        # === 预处理：转换不合法嵌套在段落/行内元素中的 <pre> 标签 ===
+        # 标准 HTML 解释器（如 lxml）会在遇到嵌套在 <p> 内的 <pre> 时，自动闭合先前未闭合的 <p> 标签。
+        # 从而将 <p>xxx<pre>code</pre>yyy</p> 树结构破坏为：<p>xxx</p><pre>code</pre>yyy
+        # 导致后面的 text 逃逸出 <p> 标签并发生行内代码强制换行。
+        # 我们在进入 BeautifulSoup 解析之前，用正则在字符串级别解决该问题。
+        inline_containers = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a']
+        for container in inline_containers:
+            pattern = re.compile(rf'(<{container}\b[^>]*>)(.*?)(</{container}>)', re.DOTALL | re.IGNORECASE)
+            
+            def replace_pre_inside(match):
+                start_tag, content, end_tag = match.group(1), match.group(2), match.group(3)
+                if '<pre' in content.lower():
+                    # 1. <pre><code>...</code></pre> -> <code>...</code>
+                    content = re.sub(
+                        r'<pre\b[^>]*>\s*<code\b[^>]*>(.*?)</code>\s*</pre>',
+                        r'<code>\1</code>',
+                        content,
+                        flags=re.DOTALL | re.IGNORECASE
+                    )
+                    # 2. <pre>...</pre> -> <code>...</code>
+                    content = re.sub(
+                        r'<pre\b[^>]*>(.*?)</pre>',
+                        r'<code>\1</code>',
+                        content,
+                        flags=re.DOTALL | re.IGNORECASE
+                    )
+                return f"{start_tag}{content}{end_tag}"
+            
+            html = pattern.sub(replace_pre_inside, html)
+
         soup = BeautifulSoup(html, 'lxml')
 
         # === 处理 a 标签的 href 属性，防止 EPUB 验证由于非法或相对链接失败 ===
@@ -578,6 +608,20 @@ class ContentProcessor:
         # 视频/音频是远程资源，Kindle 不支持
         for tag in soup(['svg', 'video', 'source', 'audio', 'track']):
             tag.decompose()
+
+        # 3.5. 转换不合法的嵌套 <pre> 标签为行内 <code> 标签
+        # 当 <pre> 标签被嵌套在 <p>、<h1>-<h6>、<span>、<a> 等行内/段落元素中时，
+        # 在 HTML/EPUB 规范中是不合法的块级嵌套。我们应将其转换为 <code> 标签。
+        # 如果 <pre> 内已包含 <code>，则可以直接 unwrap 掉 <pre>，仅保留 <code>。
+        inline_containers = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'a']
+        for container_name in inline_containers:
+            for container in soup.find_all(container_name):
+                for pre in list(container.find_all('pre')):
+                    code_child = pre.find('code')
+                    if code_child:
+                        pre.unwrap()
+                    else:
+                        pre.name = 'code'
 
         # 4. 修复嵌套结构：块级元素不能在 <p> 内
         self._fix_nested_blocks(soup)

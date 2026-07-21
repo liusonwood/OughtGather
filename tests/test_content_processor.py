@@ -810,3 +810,37 @@ class TestImgAltTitleCleaning:
         # attrs should be cleaned and output correctly
         assert 'alt="A  -  B  -  C  -  D  -  E"' in result.content
         assert 'title="X  -  Y"' in result.content
+
+
+class TestNestedPreInParagraphOrInline:
+    """测试 content_processor 对嵌套在段落 or 行内元素中的 <pre> 标签的清洗/转换行为"""
+
+    def test_nested_pre_in_p_converts_to_code(self):
+        """测试 <p> 内的 <pre> 应该转换为 <code>"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = '<p>Claude Code 新增 <pre>sandbox.filesystem.disabled</pre> 设置。</p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        # <pre> 应该被替换为 <code>，且其应该保留在 <p> 标签内部，而不被移到外面
+        assert '<p>Claude Code 新增 <code>sandbox.filesystem.disabled</code> 设置。</p>' in result.content
+
+    def test_nested_pre_with_code_in_p_unwraps_pre(self):
+        """测试 <p> 内包含 <code> 的 <pre> 标签应该直接 unwrap 掉 <pre>"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = '<p>Claude Code 新增 <pre><code>sandbox.filesystem.disabled</code></pre> 设置。</p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        # <pre> 应该被 unwrap 掉，剩下 <code>，且保留在 <p> 内部
+        assert '<p>Claude Code 新增 <code>sandbox.filesystem.disabled</code> 设置。</p>' in result.content
+
+    def test_nested_pre_in_h1_converts_to_code(self):
+        """测试 <h1> 内的 <pre> 应该转换为 <code>"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = '<h1>标题 <pre>code</pre></h1>'
+        article = _make_article(html)
+        result = processor.process(article)
+        assert '<h1>标题 <code>code</code></h1>' in result.content
+
