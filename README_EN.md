@@ -27,13 +27,15 @@ Ought Gather is a Python-based automated information aggregation tool. It collec
 
 - **Built-in Source Types**: Supports 4 core content sources out of the box: `rss`, `web`, `mail`, and `trending`.
 - **Plugin Architecture**: Easily add custom content sources using Python plugins.
+- **Serverless Automation**: Powered by GitHub Actions—no dedicated or self-hosted server required.
 - **Automatic Emoji Rendering**: Dynamically converts emojis in text into black-and-white PNG images, ensuring flawless display on Kindle and other e-paper/e-ink screens.
 - **Advanced Content Controls**: Configure source-specific priorities, link preservation (`keep_link`), full-text extraction (`full_text`), HTML element exclusion (`exclude`), and title keyword filtering (`delete`).
-- **Standard EPUB 3.0 Generation**: Creates compliant EPUB files featuring an auto-generated cover, table of contents, bodies, and a delivery summary chapter.
+- **Standard EPUB 3.0 Generation**: Creates compliant EPUB files featuring an auto-generated cover, table of contents, main body, and a delivery summary chapter.
 - **Dynamic Covers**: Supports custom cover images, fallback to Bing's Daily Wallpaper, and simple solid background fallback if network requests fail.
 - **Formatting Placeholders**: Supports `{time}` for dates in titles and `</br>` for cover line-breaks.
-- **Deduplication system**: Keeps track of processed content using `fetched_urls.txt`, with automatic pruning once records exceed 500,000 entries.
-- **Environment overrides**: Allows delivering full configurations via the `CONFIG_JSON` environment variable to keep private content feeds out of public source repositories.
+- **Deduplication System**: Keeps track of processed content using `fetched_urls.txt`, with automatic pruning once records exceed 500,000 entries.
+- **Environment Overrides**: Allows delivering full configurations via the `CONFIG_JSON` environment variable to keep private content feeds out of public source repositories.
+- **Scheduled Triggers**: Supports Cloudflare Workers as an external trigger for GitHub Actions to ensure reliable, on-time delivery.
 
 ## Requirements
 
