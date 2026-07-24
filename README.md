@@ -28,6 +28,7 @@ Ought Gather 是一个 Python 自动化信息聚合工具。它从 RSS、网页�
 
 - 内置四类内容源：`rss`、`web`、`mail`、`trending`
 - 可以用插件的形式添加自定义内容源
+- 使用 GitHub actions ，无需自己服务器
 - 自动 Emoji 渲染：将文档中的 Emoji 动态渲染为黑白 PNG 图片，确保在 Kindle 等各类水墨屏阅读器上完美显示
 - 支持按源设置优先级、链接保留、全文抓取、HTML 过滤和标题关键词删除
 - 生成 EPUB 3.0 文件，包含封面、目录、正文和推送汇总章节
@@ -35,6 +36,7 @@ Ought Gather 是一个 Python 自动化信息聚合工具。它从 RSS、网页�
 - 支持标题日期占位符 `{time}` 和封面标题换行标记 `</br>`
 - 使用 `fetched_urls.txt` 记录已处理内容；记录超过 500000 条时保留最新记录
 - 支持通过 `CONFIG_JSON` 环境变量提供完整配置，避免把私有源写入仓库
+- 支持 `Cloudflare Workers` 配置actions外部触发器，准时推送
 
 ## 环境要求
 
