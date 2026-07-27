@@ -56,3 +56,7 @@ epubcheck/
 temp_epub/
 
 output/
+
+# Gemini tools & Worktrees
+.gemini/
+
