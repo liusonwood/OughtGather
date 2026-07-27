@@ -7,7 +7,8 @@ Ought Gather 主入口
 import sys
 import os
 import time
-from typing import List
+import concurrent.futures
+from typing import List, Tuple
 
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,7 +19,16 @@ from src.processors.content_processor import ContentProcessor
 from src.dedup.tracker import DedupTracker
 from src.epub.generator import EPUBGenerator
 from src.mailer.smtp_sender import SMTPSender
-from src.utils.logger import get_logger
+from src.utils.logger import (
+    get_logger,
+    start_task_buffer,
+    stop_task_buffer,
+    flush_task_logs,
+    truncate_url,
+    log_stage,
+    log_banner,
+    log_summary_table,
+)
 
 
 def get_fetcher(source: ContentSource, global_limit: int = 15) -> BaseFetcher:
@@ -39,7 +49,6 @@ def get_fetcher(source: ContentSource, global_limit: int = 15) -> BaseFetcher:
     return fetcher_class(source, global_limit=global_limit)
 
 
-
 def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[FetchResult]:
     """
     处理抓取结果（去重、内容处理）
@@ -55,8 +64,11 @@ def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[F
     processed_results = []
 
     for result in results:
+        short_src = truncate_url(result.source.src, 40)
+        prefix = f"{result.source.type} | {short_src}"
+
         if not result.success:
-            logger.warning(f"Skipping failed source: {result.source.src}")
+            logger.warning(f"[{prefix}] 对应内容源之前抓取失败，已跳过去重处理")
             processed_results.append(result)
             continue
 
@@ -74,19 +86,18 @@ def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[F
                     article = processor.process(article)
                 except Exception as e:
                     logger.error(
-                        f"Failed to process article '{article.title}': {e}, "
-                        f"keeping original content"
+                        f"[{prefix}] 处理文章 '{article.title}' 失败: {e}，保留原始文章内容"
                     )
                 new_articles.append(article)
             else:
-                logger.debug(f"Skipping already fetched: {article.title}")
+                logger.debug(f"[{prefix}] 跳过已抓取文章: {article.title}")
 
         # 更新结果
         result.articles = new_articles
         processed_results.append(result)
 
         logger.info(
-            f"Processed {result.source.type}: {len(new_articles)}/{original_count} new articles"
+            f"[{prefix}] 内容处理完成: {len(new_articles)}/{original_count} 篇新文章"
         )
 
     return processed_results
@@ -110,104 +121,131 @@ def main():
     logger = get_logger()
     start_time = time.time()
 
-    logger.info("=" * 60)
-    logger.info("Ought Gather - Starting")
-    logger.info("=" * 60)
+    log_banner("Ought Gather - 自动化信息聚合工具")
 
     try:
-        # 1. 加载配置
-        logger.info("Loading configuration...")
+        # 1. 加载配置与去重记录
+        log_stage(1, 5, "加载配置与初始化去重追踪器")
         config = load_config()
-        logger.info(f"Loaded {len(config.body)} content sources")
-
-        # 2. 初始化去重追踪器
-        logger.info("Initializing dedup tracker...")
+        logger.info(f"成功加载 {len(config.body)} 个内容源配置")
         tracker = DedupTracker()
 
-        # 3. 抓取内容（并发处理）
-        logger.info("Fetching content concurrently...")
-        results = []
-        error_log = []
+        # 2. 抓取内容（并发处理 + 任务日志隔离缓冲）
+        log_stage(2, 5, "并发抓取内容源（开启独立日志缓冲）")
+        results: List[FetchResult] = []
+        error_log: List[str] = []
+        # 用于保存 (source, raw_count) 便于结尾计算
+        raw_counts = {}
 
-        import concurrent.futures
-
-        def fetch_source(source: ContentSource) -> FetchResult:
+        def fetch_source_task(source: ContentSource) -> Tuple[FetchResult, List[Tuple[int, str]]]:
+            start_task_buffer()
             try:
                 fetcher = get_fetcher(source, global_limit=config.limit)
-                return fetcher.fetch_with_retry()
+                res = fetcher.fetch_with_retry()
+                records = stop_task_buffer()
+                return res, records
             except Exception as e:
-                logger.error(f"Failed to fetch {source.src}: {e}")
-                return FetchResult(source=source, articles=[], success=False, error=str(e))
+                logger.error(f"抓取异常失败 {source.src}: {e}")
+                res = FetchResult(source=source, articles=[], success=False, error=str(e))
+                records = stop_task_buffer()
+                return res, records
 
-        # 限制最大线程数为 10，避免过度消耗资源
         max_workers = min(len(config.body), 10) if config.body else 1
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 提交所有抓取任务，保留 config.body 的顺序
             future_to_source = {
-                executor.submit(fetch_source, source): source
+                executor.submit(fetch_source_task, source): source
                 for source in config.body
             }
 
-            # 按照原始顺序回收结果，保证顺序稳定
+            # 按 config.body 原始顺序收集并一次性刷写每个源的完整日志，保证日志顺序连续不交错
             for future in future_to_source:
                 source = future_to_source[future]
                 try:
-                    result = future.result()
+                    result, records = future.result()
                     results.append(result)
+                    raw_counts[source] = len(result.articles) if result.success else 0
+
+                    short_src = truncate_url(source.src, 40)
+                    prefix = f"{source.type} | {short_src}"
+                    flush_task_logs(prefix, records)
+
                     if not result.success:
                         error_log.append(f"[{source.type}] {source.src}: {result.error}")
                 except Exception as e:
-                    logger.error(f"Fetcher thread failed for {source.src}: {e}")
+                    logger.error(f"线程执行失败 [{source.type}] {source.src}: {e}")
                     error_log.append(f"[{source.type}] {source.src}: {str(e)}")
-                    results.append(FetchResult(source=source, articles=[], success=False, error=str(e)))
+                    res = FetchResult(source=source, articles=[], success=False, error=str(e))
+                    results.append(res)
+                    raw_counts[source] = 0
 
-        # 4. 处理结果（去重、内容处理）
-        logger.info("Processing results...")
+        # 3. 处理结果（去重、内容过滤处理）
+        log_stage(3, 5, "去重与内容过滤处理")
         processed_results = process_results(results, tracker)
 
-        # 5. 检查是否有新内容
+        # 4. 检查是否有新内容并生成 EPUB
+        log_stage(4, 5, "检查新内容并生成 EPUB")
         if not has_new_content(processed_results):
-            logger.info("No new content found. Exiting without generating EPUB.")
-            return
+            logger.info("未发现新文章内容，跳过 EPUB 生成并退出。")
+        else:
+            epub_generator = EPUBGenerator(config)
+            epub_path = epub_generator.generate(processed_results, error_log, start_time=start_time)
 
-        # 6. 生成 EPUB
-        logger.info("Generating EPUB...")
-        epub_generator = EPUBGenerator(config)
-        epub_path = epub_generator.generate(processed_results, error_log, start_time=start_time)
+            # 5. 发送邮件与 WebDAV 上传
+            log_stage(5, 5, "推送分发与保存记录")
+            logger.info("正在发送 EPUB 至 Kindle 邮箱...")
+            try:
+                sender = SMTPSender()
+                subject = config.title.get_plain_text()
+                sender.send_epub(epub_path, subject)
+            except Exception as e:
+                logger.error(f"发送邮件失败: {e}")
+                error_log.append(f"Email sending failed: {str(e)}")
 
-        # 7. 发送邮件
-        logger.info("Sending EPUB to Kindle...")
-        try:
-            sender = SMTPSender()
-            subject = config.title.get_plain_text()
-            sender.send_epub(epub_path, subject)
-        except Exception as e:
-            logger.error(f"Failed to send email: {e}")
-            error_log.append(f"Email sending failed: {str(e)}")
+            logger.info("正在上传 EPUB 至 WebDAV...")
+            try:
+                from src.uploader.webdav_uploader import WebDavUploader
+                uploader = WebDavUploader()
+                if uploader.upload_epub(epub_path):
+                    logger.info("EPUB 成功上传至 WebDAV")
+            except Exception as e:
+                logger.error(f"WebDAV 上传失败: {e}")
+                error_log.append(f"WebDAV upload failed: {str(e)}")
 
-        # 8. WebDAV 上传
-        logger.info("Uploading EPUB to WebDAV...")
-        try:
-            from src.uploader.webdav_uploader import WebDavUploader
-            uploader = WebDavUploader()
-            if uploader.upload_epub(epub_path):
-                logger.info("EPUB uploaded to WebDAV")
-        except Exception as e:
-            logger.error(f"Failed to upload to WebDAV: {e}")
-            error_log.append(f"WebDAV upload failed: {str(e)}")
+            logger.info("保存去重数据库...")
+            tracker.save()
 
-        # 9. 保存去重记录
-        logger.info("Saving dedup records...")
-        tracker.save()
+        # 6. 输出执行数据汇总表格
+        summary_headers = ["#", "类型", "内容源 / URL", "状态", "抓取数", "新增数", "备注 / 错误"]
+        summary_rows = []
+        for idx, res in enumerate(processed_results, start=1):
+            s = res.source
+            raw_c = raw_counts.get(s, len(res.articles) if res.success else 0)
+            new_c = len(res.articles) if res.success else 0
+            if not res.success:
+                status = "FAILED"
+                note = truncate_url(res.error or "Unknown error", 30)
+            elif new_c > 0:
+                status = "SUCCESS"
+                note = ""
+            else:
+                status = "SKIPPED"
+                note = "无新文章"
 
-        # 10. 输出统计信息
+            summary_rows.append([
+                idx,
+                s.type,
+                truncate_url(s.src, 35),
+                status,
+                raw_c,
+                new_c,
+                note
+            ])
+
+        log_banner("执行数据汇总表")
+        log_summary_table(summary_headers, summary_rows)
+
         stats = tracker.get_stats()
-        logger.info("=" * 60)
-        logger.info("Ought Gather - Completed")
-        logger.info(f"Total fetched: {stats['total_fetched']}")
-        logger.info(f"New content: {stats['new_fetched']}")
-        logger.info(f"EPUB: {epub_path}")
-        logger.info("=" * 60)
+        logger.info(f"历史累计抓取: {stats['total_fetched']} | 本次新增入库: {stats['new_fetched']}")
 
     except Exception as e:
         logger.exception(f"Fatal error: {e}")
