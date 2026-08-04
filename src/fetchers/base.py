@@ -82,6 +82,7 @@ class BaseFetcher(ABC):
     required_secrets: Dict[str, str] = {}
     custom_css: str = ""
     supports_two_phase: bool = False  # 子类设为 True 表示支持两阶段抓取接口
+    dedup_enabled: bool = True  # 子类可设为 False 表示禁用去重（如 Weather, Trending, Web）
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)

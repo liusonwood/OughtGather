@@ -255,8 +255,8 @@ class TestDedupIntegration:
         # 第三次运行（应该能加载所有记录）
         tracker3 = DedupTracker(str(dedup_file))
         stats = tracker3.get_stats()
-        # 每篇产 2 条哈希（URL + 内容），3 篇文章 = 6 条
-        assert stats["total_fetched"] == 6
+        # 3 篇文章 = 3 条 URL 哈希
+        assert stats["total_fetched"] == 3
         assert stats["new_fetched"] == 0  # 没有新标记
 
         print(f"✓ 第三次运行：总共 {stats['total_fetched']} 篇已抓取")
