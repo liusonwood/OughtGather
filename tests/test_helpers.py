@@ -28,14 +28,14 @@ class TestNormalizeUrl:
     def test_removes_multiple_trailing_slashes(self):
         assert normalize_url("https://example.com///") == "https://example.com"
 
-    def test_removes_query_params(self):
-        assert normalize_url("https://example.com/page?utm=123") == "https://example.com/page"
+    def test_preserves_query_params(self):
+        assert normalize_url("https://example.com/page?utm=123") == "https://example.com/page?utm=123"
 
     def test_removes_fragment(self):
         assert normalize_url("https://example.com/page#section") == "https://example.com/page"
 
-    def test_removes_both_query_and_fragment(self):
-        assert normalize_url("https://example.com/page?q=1#s") == "https://example.com/page"
+    def test_removes_fragment_preserves_query(self):
+        assert normalize_url("https://example.com/page?q=1#s") == "https://example.com/page?q=1"
 
     def test_preserves_path(self):
         assert normalize_url("https://example.com/a/b/c") == "https://example.com/a/b/c"
@@ -66,11 +66,11 @@ class TestGenerateContentId:
         id2 = generate_content_id("https://example.com/b", "标题")
         assert id1 != id2
 
-    def test_different_title_different_id(self):
-        """不同标题生成不同 ID"""
+    def test_different_title_same_url_same_id(self):
+        """仅 URL 决定 ID，不同标题生成相同 ID"""
         id1 = generate_content_id("https://example.com", "标题A")
         id2 = generate_content_id("https://example.com", "标题B")
-        assert id1 != id2
+        assert id1 == id2
 
     def test_no_title(self):
         """不提供标题也能正常生成 ID"""

@@ -15,6 +15,7 @@ class WebFetcher(BaseFetcher):
     """网页抓取器"""
 
     type_name = "web"
+    dedup_enabled = False
     src_placeholder = "网页 URL"
     config_schema = {}
 

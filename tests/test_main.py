@@ -130,9 +130,7 @@ class TestProcessResultsValidContent:
         assert len(out) == 1
         assert len(out[0].articles) == 1
         assert out[0].articles[0].title == "有效文章"
-        tracker.mark_as_fetched.assert_called_once_with(
-            valid.url, valid.title, valid.published_date
-        )
+        tracker.mark_as_fetched.assert_called_once_with(valid.url)
 
     @patch("src.main.ContentProcessor")
     def test_empty_article_not_marked_not_included(self, mock_cp_cls):
@@ -214,13 +212,11 @@ class TestProcessResultsValidContent:
 
         assert len(out[0].articles) == 1
         assert out[0].articles[0].title == "好文章"
-        tracker.mark_as_fetched.assert_called_once_with(
-            valid.url, valid.title, valid.published_date
-        )
+        tracker.mark_as_fetched.assert_called_once_with(valid.url)
 
     @patch("src.main.ContentProcessor")
-    def test_already_fetched_skipped_with_url_hash_backfill(self, mock_cp_cls):
-        """已抓取文章不进入推送，但会回填 URL 哈希供下次阶段一去重。"""
+    def test_already_fetched_skipped(self, mock_cp_cls):
+        """已抓取文章跳过推送，且不调用 mark_as_fetched。"""
         source = self._source()
         article = self._article("已抓取", "这是足够长的正文，但去重库中已有记录。")
         result = FetchResult(source=source, articles=[article], success=True)
@@ -235,10 +231,7 @@ class TestProcessResultsValidContent:
 
         assert out[0].articles == []
         mock_processor.process.assert_not_called()
-        # 回填 URL-only 哈希（兼容历史仅内容哈希的记录）
-        tracker.mark_as_fetched.assert_called_once_with(
-            article.url, article.title, article.published_date
-        )
+        tracker.mark_as_fetched.assert_not_called()
 
     def test_failed_result_passed_through(self):
         source = self._source()

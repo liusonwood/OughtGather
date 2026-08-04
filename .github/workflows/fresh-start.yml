@@ -1,0 +1,80 @@
+name: Fresh Start Deduplication
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: oughtgather-dedup
+  cancel-in-progress: false
+
+jobs:
+  fresh-start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout="40" update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout="40" install -y --no-install-recommends fonts-wqy-zenhei
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Prepare config.json
+        env:
+          CONFIG_JSON: ${{ secrets.CONFIG_JSON }}
+        run: |
+          if [ -n "$CONFIG_JSON" ]; then
+            echo "Using CONFIG_JSON from GitHub Secret"
+            echo "$CONFIG_JSON" > config.json
+          elif [ -f config.json ]; then
+            echo "Using config.json from repository"
+          else
+            echo "::error::No config found. Set CONFIG_JSON secret or commit config.json to the repo."
+            exit 1
+          fi
+
+      - name: Cache dedup records
+        uses: actions/cache@v4
+        with:
+          path: data/fetched_urls.txt
+          key: ${{ runner.os }}-dedup-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-dedup-
+
+      - name: Run Fresh Start
+        env:
+          TZ: Asia/Shanghai
+          OPENROUTER_API_ENDPOINT: ${{ secrets.OPENROUTER_API_ENDPOINT }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
+          QWEATHER_HOST: ${{ secrets.QWEATHER_HOST }}
+          QWEATHER_KEY: ${{ secrets.QWEATHER_KEY }}
+          RAINDROPIO_API_KEY: ${{ secrets.RAINDROPIO_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          TESTMAIL_APP_API_KEY: ${{ secrets.TESTMAIL_APP_API_KEY }}
+        run: |
+          python src/main.py --fresh-start
+
+      - name: Upload dedup records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dedup-records
+          path: data/fetched_urls.txt
+          if-no-files-found: ignore
+          retention-days: 7

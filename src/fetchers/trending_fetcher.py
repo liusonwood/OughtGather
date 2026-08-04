@@ -19,6 +19,7 @@ class TrendingFetcher(BaseFetcher):
     """热点分析抓取器"""
 
     type_name = "trending"
+    dedup_enabled = False
     src_placeholder = "关键词, 例如: 人工智能最新发展趋势"
     
     # 按照配置规范注册 config_schema

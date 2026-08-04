@@ -33,38 +33,23 @@ def get_now(tz: Optional[ZoneInfo] = None) -> datetime:
 def normalize_url(url: str) -> str:
     """
     标准化 URL
-    移除末尾斜杠、统一协议等
+    保留 Query 参数，仅剥离末尾斜杠和 fragment (#anchor)
     """
     if not url:
         return ""
 
-    # 移除片段和查询参数（用于去重）
     parsed = urlparse(url)
-    normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-
-    # 移除末尾斜杠
-    normalized = normalized.rstrip('/')
-
-    return normalized
+    path = parsed.path.rstrip('/')
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"{parsed.scheme}://{parsed.netloc}{path}{query}"
 
 
 def generate_content_id(url: str, title: Optional[str] = None, published_date: Optional[str] = None) -> str:
     """
-    生成内容唯一标识符
-    用于去重追踪
-
-    Args:
-        url: 内容 URL
-        title: 内容标题
-        published_date: 发布日期（用于 trending/web 等每日刷新场景）
+    生成内容唯一标识符 (MD5 哈希)
+    仅基于标准化后的 URL
     """
-    # 使用 URL、标题和日期的组合作为标识
     content = normalize_url(url)
-    if title:
-        content += f"|{title}"
-    if published_date:
-        content += f"|{published_date}"
-
     return hashlib.md5(content.encode('utf-8')).hexdigest()
 
 

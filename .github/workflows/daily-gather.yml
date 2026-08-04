@@ -7,6 +7,10 @@ on:
   repository_dispatch:  # 支持 Cloudflare Workers 等外部触发
     types: [Daily_Gather_cf_triggerd]
 
+concurrency:
+  group: oughtgather-dedup
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest

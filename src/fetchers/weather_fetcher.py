@@ -11,6 +11,7 @@ class WeatherFetcher(BaseFetcher):
     """QWeather API Fetcher for fetching weather forecasts and generating formatted weather reports."""
     
     type_name = "weather"
+    dedup_enabled = False
     src_placeholder = "城市名称，例如: 北京 或 Shanghai"
     config_schema = {
         "metadata.date": {
