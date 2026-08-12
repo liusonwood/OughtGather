@@ -453,21 +453,30 @@ class ContentProcessor:
         """
         # === 全局预处理：将单行 <pre> 转换为行内 <code> ===
         # 问题根源：trafilatura 在提取 HTML 时，会把原始文章中的行内 <code> 标签
-        # 转换为 <pre> 标签（例如 sspai 等平台）。这些被错误转换的 <pre> 内容均为
-        # 单行文本（无换行符），在 EPUB 中会以代码块形式渲染，造成排版破碎。
-        # 解决方案：在所有其他处理之前，全局扫描内容不含换行符的 <pre> 标签，
-        # 将其转换回行内 <code>（若 <pre> 内已有 <code> 子标签，则仅 unwrap <pre>）。
-        # 真正的多行代码块（包含 \n）保留为 <pre>，不受影响。
+        # 转换为 <pre> 标签（例如 sspai 等平台）。这些被错误转换的 <pre> 内容在包含
+        # 首尾换行符或空白时（如 <pre><code>\ncmd\n</code></pre>），过去会被误判为
+        # 多行代码块，从而拆分段落 <p>，在 Kindle 上显示为强制换行。
+        # 解决方案：剥离首尾换行符后再检测内部是否包含换行。若内容为单行文本，
+        # 将其转换/unwrap 为行内 <code> 标签。真正的多行代码块（包含内部 \n）保留为 <pre>。
+        def _is_single_line_pre_content(inner: str) -> bool:
+            code_match = re.match(r'^\s*<code\b[^>]*>(.*?)</code>\s*$', inner, re.DOTALL | re.IGNORECASE)
+            if code_match:
+                text = code_match.group(1).strip('\r\n')
+            else:
+                text = inner.strip('\r\n ')
+            return not ('\n' in text or '\r' in text or '<br' in text.lower())
+
         def _convert_singleline_pre_to_code(m: re.Match) -> str:
             inner = m.group(1)
-            # 含换行符 → 保留为块级代码块
-            if '\n' in inner or '\r' in inner or '<br' in inner.lower():
+            if not _is_single_line_pre_content(inner):
                 return m.group(0)
-            # <pre><code...>...</code></pre> → 直接 unwrap pre
-            if re.match(r'^\s*<code\b', inner, re.IGNORECASE):
-                return inner.strip()
-            # <pre>单行内容</pre> → <code>内容</code>
-            return f'<code>{inner}</code>'
+            
+            code_match = re.match(r'^\s*<code\b([^>]*)>(.*?)</code>\s*$', inner, re.DOTALL | re.IGNORECASE)
+            if code_match:
+                attrs = code_match.group(1)
+                code_text = code_match.group(2).strip('\r\n')
+                return f'<code{attrs}>{code_text}</code>'
+            return f'<code>{inner.strip()}</code>'
 
         html = re.sub(
             r'<pre\b[^>]*>(.*?)</pre>',
@@ -525,11 +534,11 @@ class ContentProcessor:
             # 匹配所有 <pre>...</pre> 子块
             pre_blocks = list(re.finditer(r'<pre\b[^>]*>(.*?)</pre>', p_content, re.DOTALL | re.IGNORECASE))
             
-            # 判断是否所有嵌套的 <pre> 块都是单行的（即没有换行符或 <br>）
+            # 判断是否所有嵌套的 <pre> 块都是单行的（即没有内部换行符或 <br>）
             all_single_line = True
             for pb in pre_blocks:
                 inner = pb.group(1)
-                if '\n' in inner or '\r' in inner or '<br' in inner.lower():
+                if not _is_single_line_pre_content(inner):
                     all_single_line = False
                     break
             
@@ -564,6 +573,10 @@ class ContentProcessor:
             return "".join(res)
 
         html = p_pattern.sub(replace_pre_inside_p, html)
+
+        # 清除行内 code 标签紧邻的前后换行符，防止在 Kindle 等阅读器中强制换行
+        html = re.sub(r'[\r\n]+\s*(<code\b)', r'\1', html)
+        html = re.sub(r'(</code>)\s*[\r\n]+', r'\1', html)
 
         soup = BeautifulSoup(html, 'lxml')
 

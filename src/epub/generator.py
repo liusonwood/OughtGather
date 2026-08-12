@@ -1020,12 +1020,11 @@ code {
     font-family: monospace;
     font-size: 0.85em;
     background-color: #f5f5f5;
-    padding: 1px 3px;
-    border-radius: 3px;
+    padding: 0 2px;
     display: inline !important;
     white-space: normal;
     word-wrap: break-word;
-    word-break: break-all;
+    word-break: break-word;
 }
 pre {
     font-family: monospace;

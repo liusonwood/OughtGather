@@ -924,6 +924,24 @@ class TestNestedPreInParagraphOrInline:
         result = processor.process(article)
         assert '<pre>def foo():\n    pass</pre>' in result.content
 
+    def test_singleline_pre_with_newlines_inside_converts_to_code(self):
+        """测试包含首尾换行符的单行 <pre><code> 标签转换行内 <code> 且不拆分 <p>"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = '<p>建议先执行一次<pre><code>\npkg update && pkg upgrade -y\n</code></pre>命令</p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        assert '<p>建议先执行一次<code>pkg update &amp;&amp; pkg upgrade -y</code>命令</p>' in result.content
+
+    def test_newlines_around_code_tags_removed(self):
+        """测试清除行内 code 标签紧邻的前后换行符，确保行内连续显示"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = '<p>建议先执行一次\n<code>pkg update && pkg upgrade -y</code>\n命令</p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        assert '<p>建议先执行一次<code>pkg update &amp;&amp; pkg upgrade -y</code>命令</p>' in result.content
+
     def test_exclude_applied_after_clean_html_and_keep_link(self):
         """测试 exclude 规则在 HTML 清洗和 keep_link 规则之后应用"""
         source = ContentSource(
