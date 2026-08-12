@@ -882,3 +882,23 @@ class TestNestedPreInParagraphOrInline:
         result = processor.process(article)
         assert '<pre>def foo():\n    pass</pre>' in result.content
 
+    def test_exclude_applied_after_clean_html_and_keep_link(self):
+        """测试 exclude 规则在 HTML 清洗和 keep_link 规则之后应用"""
+        source = ContentSource(
+            type="rss",
+            src="https://example.com/rss",
+            keep_link="N",
+            exclude=[{"type": "exact", "value": "<p>广告</p>"}],
+        )
+        processor = ContentProcessor(source)
+        # 原始 HTML 中包含 <a> 标签：<p><a href="https://ad.com">广告</a></p>
+        # 1. clean_html 清洗 HTML
+        # 2. keep_link="N" 移除 <a> 标签，使其变为 <p>广告</p>
+        # 3. exclude 规则匹配 exact "<p>广告</p>" 并成功将其移除
+        html = '<p>正文内容</p><p><a href="https://ad.com">广告</a></p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        assert "广告" not in result.content
+        assert "正文内容" in result.content
+
+

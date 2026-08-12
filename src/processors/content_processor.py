@@ -62,16 +62,16 @@ class ContentProcessor:
                     soup.insert(0, wrapper)
                 article.content = soup.body.decode_contents() if soup.body else str(soup)
 
-        # 1. 应用 exclude 规则
-        if self.source.exclude:
-            article.content = self._apply_exclude(article.content)
-
-        # 2. 清洗 HTML
+        # 1. 清洗 HTML
         article.content = self._clean_html(article.content, base_url=article.url)
 
-        # 3. 应用 keep_link 规则
+        # 2. 应用 keep_link 规则
         if self.source.keep_link == "N":
             article.content = self._remove_links(article.content)
+
+        # 3. 应用 exclude 规则
+        if self.source.exclude:
+            article.content = self._apply_exclude(article.content)
 
         # 4. 确保 HTML 格式正确
         article.content = self._ensure_valid_html(article.content)
