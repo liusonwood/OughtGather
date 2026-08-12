@@ -4,6 +4,7 @@
 """
 
 import io
+import os
 import platform
 from typing import List, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont
@@ -259,6 +260,17 @@ class CoverGenerator:
         """
         system = platform.system()
 
+        # 仓库内置字体候选（优先使用，避免依赖系统包）
+        repo_fonts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Fonts"))
+        repo_candidates = [
+            os.path.join(repo_fonts_dir, "wqy-microhei.ttc"),
+            os.path.join(repo_fonts_dir, "wqy-zenhei.ttc"),
+            os.path.join(repo_fonts_dir, "NotoSansSC-Bold.otf"),
+            os.path.join(repo_fonts_dir, "NotoSansSC-Bold.ttf"),
+            os.path.join(repo_fonts_dir, "NotoSansSC-Regular.otf"),
+            os.path.join(repo_fonts_dir, "NotoSansSC-Regular.ttf"),
+        ]
+
         # 通用 Linux 候选（GitHub Actions / Ubuntu）
         linux_candidates = [
             # Noto Sans CJK（需安装 fonts-noto-cjk-extra 或 fonts-noto-cjk）
@@ -290,11 +302,11 @@ class CoverGenerator:
         ]
 
         if system == "Darwin":
-            return macos_candidates + linux_candidates
+            return repo_candidates + macos_candidates + linux_candidates
         elif system == "Windows":
-            return windows_candidates + linux_candidates
+            return repo_candidates + windows_candidates + linux_candidates
         else:
-            return linux_candidates
+            return repo_candidates + linux_candidates
 
     def _load_font(self, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
         """
