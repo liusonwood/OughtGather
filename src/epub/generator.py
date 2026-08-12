@@ -497,14 +497,16 @@ class EPUBGenerator:
         src = None
         remote_attrs = ['data-src', 'data-original', 'data-actualsrc', 'data-lazy-src', 'srcset', 'data-srcset', 'file', 'zoom-target', 'original']
         
-        # 检查 srcset (Bug 4)
+        # 检查 srcset
         srcset = img.get('data-srcset') or img.get('srcset')
         if srcset:
             candidates = []
             for part in srcset.split(','):
                 parts = part.strip().split()
                 if parts:
-                    candidates.append(parts[0])
+                    url = parts[0]
+                    if not any(ext in url.lower() for ext in ['.gif', '.svg']) and not url.lower().startswith('data:'):
+                        candidates.append(url)
             if candidates:
                 src = candidates[-1]
         
@@ -518,6 +520,8 @@ class EPUBGenerator:
         
         if not src:
             src = img.get('src')
+            if src and (any(ext in src.lower() for ext in ['.gif', '.svg']) or src.lower().startswith('data:')):
+                src = None
             
         return src, remote_attrs
 

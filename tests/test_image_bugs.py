@@ -34,6 +34,24 @@ class TestImageBugs:
         # placeholder.gif should be ignored if data-src is present
         assert "placeholder.gif" not in images
 
+    def test_srcset_gif_svg_and_data_uri_filtering(self):
+        """Test Bug 3: srcset parsing filters out .gif, .svg, and data: URIs."""
+        source = ContentSource(type="web", src="https://example.com", title="Test")
+        fetcher = WebFetcher(source)
+        
+        html = """
+        <html>
+            <body>
+                <img srcset="https://example.com/small.gif 100w, https://example.com/large.svg 200w">
+                <img srcset="data:image/png;base64,12345 100w, https://example.com/real-srcset.jpg 200w">
+                <img src="https://example.com/static.gif">
+            </body>
+        </html>
+        """
+        
+        images = fetcher._extract_images(html)
+        assert images == ["https://example.com/real-srcset.jpg"]
+
     def test_image_replacement_with_encoding(self):
         """Test Bug 2: URL encoding mismatch (& vs &amp;)."""
         config_data = {

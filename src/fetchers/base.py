@@ -309,7 +309,9 @@ class BaseFetcher(ABC):
                 for part in srcset.split(','):
                     parts = part.strip().split()
                     if parts:
-                        candidates.append(parts[0])
+                        url = parts[0]
+                        if not any(ext in url.lower() for ext in ['.gif', '.svg']) and not url.lower().startswith('data:'):
+                            candidates.append(url)
                 if candidates:
                     src = candidates[-1] # 假设最后一个是最大的
             
@@ -329,7 +331,7 @@ class BaseFetcher(ABC):
                 continue
                 
             # 2. 基础过滤
-            if src.startswith('data:image'):
+            if src.lower().startswith('data:') or any(ext in src.lower() for ext in ['.gif', '.svg']):
                 continue
             
             # 排除明显的占位图/图标
