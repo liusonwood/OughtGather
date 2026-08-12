@@ -657,6 +657,17 @@ class TestEmojiProcessing:
         assert 'src="images/emoji_1f4f0.png"' in rendered
         assert "&lt;测试&gt;" in rendered
 
+    def test_lead_image_insertion_when_body_is_none(self):
+        """测试当 soup.body 为 None 时，也能正确嵌入首图而非放到 html 外"""
+        source = ContentSource(type="rss", src="https://example.com/rss")
+        processor = ContentProcessor(source)
+        
+        html = "<html><head><title>Test</title></head></html>"
+        article = Article(title="Test", content=html, url="https://example.com", images=["https://example.com/lead.jpg"])
+        
+        result = processor.process(article)
+        assert '<p><img alt="Lead Image" src="https://example.com/lead.jpg"/></p>' in result.content
+
 class TestLayoutTableCleaning:
     """测试邮件布局表格与样式清洗行为"""
 

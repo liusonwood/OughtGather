@@ -56,11 +56,14 @@ class ContentProcessor:
                 lead_img_tag = soup.new_tag('img', src=lead_image, alt="Lead Image")
                 wrapper = soup.new_tag('p')
                 wrapper.append(lead_img_tag)
-                if soup.body:
-                    soup.body.insert(0, wrapper)
-                else:
-                    soup.insert(0, wrapper)
-                article.content = soup.body.decode_contents() if soup.body else str(soup)
+                if not soup.body:
+                    body = soup.new_tag('body')
+                    if soup.html:
+                        soup.html.append(body)
+                    else:
+                        soup.append(body)
+                soup.body.insert(0, wrapper)
+                article.content = soup.body.decode_contents()
 
         # 1. 清洗 HTML
         article.content = self._clean_html(article.content, base_url=article.url)
