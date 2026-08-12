@@ -375,24 +375,68 @@ class ContentProcessor:
 
         return str(soup)
 
-    def _is_small_rendered_image(self, img_tag: BeautifulSoup) -> bool:
-        """检查图片是否为包含在 <a> 中的渲染尺寸较小的图片"""
-        if not img_tag.find_parent('a'):
+    # 邮件/网页中社交分享图标常见标记（alt 或 src）
+    _SOCIAL_IMAGE_HINTS = (
+        'share on', 'facebook', 'twitter', 'linkedin', 'instagram',
+        'threads', 'whatsapp', 'telegram', 'weibo', 'wechat',
+        'pinterest', 'reddit', 'tiktok', 'youtube',
+        'static_assets/header/', '/x.png', 'x_light', 'social',
+    )
+
+    def _declared_image_size_px(self, img_tag) -> Optional[int]:
+        """
+        从 width/height 属性或 style 中解析声明的最小渲染尺寸（px）。
+        无法判断时返回 None。
+        """
+        sizes = []
+        for attr in ('width', 'height'):
+            val = img_tag.get(attr)
+            if val is None:
+                continue
+            raw = str(val).strip().lower().replace('px', '')
+            if raw.isdigit():
+                sizes.append(int(raw))
+
+        style = (img_tag.get('style') or '').lower()
+        for match in re.findall(r'(?:max-)?(?:width|height)\s*:\s*(\d+(?:\.\d+)?)px', style):
+            try:
+                sizes.append(int(float(match)))
+            except ValueError:
+                continue
+
+        return min(sizes) if sizes else None
+
+    def _is_small_rendered_image(self, img_tag) -> bool:
+        """
+        判断是否为应剔除的装饰性小图（社交分享图标、跟踪像素等）。
+
+        说明：
+        邮件模版常写成 <a><table>...<img width=18></table></a>。
+        lxml 会把 table 从 a 中拆出，导致 img 不再有 a 祖先，仅靠
+        「在 a 内」的旧逻辑会漏掉 beehiiv 等 newsletter 的 Facebook/X 图标。
+        因此同时依据：声明尺寸、父级 a、alt/src 社交关键词。
+        """
+        size = self._declared_image_size_px(img_tag)
+        alt = (img_tag.get('alt') or '').lower()
+        src = (img_tag.get('src') or '').lower()
+        combined = f'{alt} {src}'
+
+        # 跟踪像素 / 1×1 打开回执
+        if size is not None and size <= 2:
+            return True
+
+        is_small = size is not None and size <= 32
+        if not is_small:
             return False
 
-        # 检查 width/height 属性
-        for attr in ['width', 'height']:
-            val = img_tag.get(attr)
-            if val and val.isdigit() and int(val) <= 32:
-                return True
+        # 经典路径：链接着的小图标
+        if img_tag.find_parent('a'):
+            return True
 
-        # 检查 style 属性
-        style = img_tag.get('style', '').lower()
-        if 'max-width' in style or 'width' in style:
-            matches = re.findall(r'(\d+)px', style)
-            for val in matches:
-                if int(val) <= 32:
-                    return True
+        # lxml 拆掉 a>table 后，靠 alt/src 识别社交图标
+        if any(hint in combined for hint in self._SOCIAL_IMAGE_HINTS):
+            return True
+
         return False
 
     def _clean_html(self, html: str, base_url: Optional[str] = None) -> str:
@@ -574,12 +618,20 @@ class ContentProcessor:
         # === 布局清洗：将复杂的、嵌套的邮件/网页模版表格拆解为普通文本流 ===
         self._unwrap_layout_tables(soup)
 
-        # === 预过滤：移除被包含在 <a> 中的社交小图标 ===
-        for img in soup.find_all('img'):
+        # === 预过滤：移除社交分享小图标与跟踪像素 ===
+        for img in list(soup.find_all('img')):
             if self._is_small_rendered_image(img):
                 parent_a = img.find_parent('a')
                 if parent_a:
-                    parent_a.decompose()
+                    # 若链接内只剩该图标（无其它图、无文字），整段分享链接一起删
+                    other_imgs = [c for c in parent_a.find_all('img') if c is not img]
+                    other_text = parent_a.get_text(strip=True)
+                    if not other_imgs and not other_text:
+                        parent_a.decompose()
+                    else:
+                        img.decompose()
+                else:
+                    img.decompose()
 
         # === EPUB 验证修复规则 ===
 

@@ -324,7 +324,7 @@ class TestCleanHtml:
                     <img src="big.png" width="50" height="50">
                 </a>
                 
-                <!-- 场景 3: 应被保留 (孤立 16px img) -->
+                <!-- 场景 3: 应被保留 (孤立 16px img，无社交关键词) -->
                 <img src="standalone.png" width="16">
             </body>
         </html>
@@ -344,6 +344,48 @@ class TestCleanHtml:
         
         # 场景 3 应该存在
         assert soup.find('img', src="standalone.png")
+
+    def test_filter_beehiiv_style_social_icons_without_a_parent(self):
+        """
+        beehiiv 等邮件模版：<a> 包裹 table/img 时，lxml 会拆掉 a 与 img 的父子关系。
+        即使没有 a 祖先，声明尺寸 + alt/src 社交关键词也应过滤。
+        """
+        source = ContentSource(type="mail", src="ns.tag")
+        processor = ContentProcessor(source)
+        # 模拟 lxml 拆解后的结构：img 不在 a 内
+        html = """
+        <html><body>
+          <a href="https://facebook.com/share"></a>
+          <table>
+            <tr><td>
+              <img alt="share on facebook" width="18"
+                   src="https://media.beehiiv.com/static_assets/header/facebook.png"
+                   style="width: 18px; height: 18px; max-width: 18px;">
+            </td></tr>
+            <tr><td>
+              <img alt="share on twitter" width="18"
+                   src="https://media.beehiiv.com/static_assets/header/x.png"
+                   style="width:18px;height:18px">
+            </td></tr>
+            <tr><td>
+              <img alt="share on linkedin" width="18"
+                   src="https://media.beehiiv.com/static_assets/header/linkedin.png">
+            </td></tr>
+          </table>
+          <img src="https://example.com/content-hero.png" width="630" alt="article">
+          <img src="https://example.com/track.gif" width="1" height="1" alt="">
+        </body></html>
+        """
+        article = _make_article(html)
+        result = processor.process(article)
+        soup = BeautifulSoup(result.content, 'lxml')
+        srcs = [img.get('src', '') for img in soup.find_all('img')]
+
+        assert not any('facebook.png' in s for s in srcs)
+        assert not any('/x.png' in s or s.endswith('x.png') for s in srcs)
+        assert not any('linkedin.png' in s for s in srcs)
+        assert not any('track.gif' in s for s in srcs)
+        assert any('content-hero.png' in s for s in srcs)
 
 
 # =========================================================================

@@ -567,6 +567,50 @@ class TestMailFetcher:
         assert "limit=10" in api_url
         assert "timestamp_from=1718300000000" in api_url
 
+    @patch.dict("os.environ", {"TESTMAIL_APP_API_KEY": "test_key_123"})
+    def test_extract_images_skips_social_and_tracking(self):
+        """邮件头社交图标与 1x1 跟踪像素不应进入 article.images"""
+        source = ContentSource(type="mail", src="ns.tag")
+        fetcher = MailFetcher(source)
+        html = """
+        <html><body>
+          <img alt="share on facebook" width="18"
+               src="https://media.example.com/static_assets/header/facebook.png"
+               style="width:18px;height:18px">
+          <img alt="share on twitter" width="18"
+               src="https://media.example.com/static_assets/header/x.png">
+          <img src="https://track.example.com/o/pixel.gif" width="1" height="1">
+          <img src="https://cdn.example.com/article-hero.jpg" width="630" alt="hero">
+        </body></html>
+        """
+        images = fetcher._extract_images(html)
+        assert images == ["https://cdn.example.com/article-hero.jpg"]
+
+    @patch.dict("os.environ", {"TESTMAIL_APP_API_KEY": "test_key_123"})
+    def test_parse_email_filters_social_from_image_list(self):
+        """_parse_email 提取的 images 不应以社交图标为首图"""
+        source = ContentSource(type="mail", src="ns.tag")
+        fetcher = MailFetcher(source)
+        email = {
+            "subject": "Newsletter",
+            "from": "news@example.com",
+            "to": "me@testmail.app",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "html": """
+            <html><body>
+              <img alt="share on facebook" width="18"
+                   src="https://media.beehiiv.com/static_assets/header/facebook.png">
+              <img src="https://cdn.example.com/real-content.png" width="630">
+              <p>Hello</p>
+            </body></html>
+            """,
+            "attachments": [],
+        }
+        article = fetcher._parse_email(email)
+        assert article.images
+        assert "facebook.png" not in article.images[0]
+        assert any("real-content.png" in u for u in article.images)
+
 
 # =========================================================================
 # TrendingFetcher 测试
