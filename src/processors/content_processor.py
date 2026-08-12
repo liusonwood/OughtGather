@@ -56,22 +56,25 @@ class ContentProcessor:
                 lead_img_tag = soup.new_tag('img', src=lead_image, alt="Lead Image")
                 wrapper = soup.new_tag('p')
                 wrapper.append(lead_img_tag)
-                if soup.body:
-                    soup.body.insert(0, wrapper)
-                else:
-                    soup.insert(0, wrapper)
-                article.content = soup.body.decode_contents() if soup.body else str(soup)
+                if not soup.body:
+                    body = soup.new_tag('body')
+                    if soup.html:
+                        soup.html.append(body)
+                    else:
+                        soup.append(body)
+                soup.body.insert(0, wrapper)
+                article.content = soup.body.decode_contents()
 
-        # 1. 应用 exclude 规则
-        if self.source.exclude:
-            article.content = self._apply_exclude(article.content)
-
-        # 2. 清洗 HTML
+        # 1. 清洗 HTML
         article.content = self._clean_html(article.content, base_url=article.url)
 
-        # 3. 应用 keep_link 规则
+        # 2. 应用 keep_link 规则
         if self.source.keep_link == "N":
             article.content = self._remove_links(article.content)
+
+        # 3. 应用 exclude 规则
+        if self.source.exclude:
+            article.content = self._apply_exclude(article.content)
 
         # 4. 确保 HTML 格式正确
         article.content = self._ensure_valid_html(article.content)
@@ -112,7 +115,10 @@ class ContentProcessor:
                 new_text = emoji_pattern.sub(r'<span class="emoji">\1</span>', str(text_node))
                 # 重新解析含有 span 的字符串片段，并将所有内容替换回文本节点
                 parsed_new = BeautifulSoup(new_text, 'lxml').body
-                text_node.replace_with(*parsed_new.contents)
+                if parsed_new and parsed_new.contents:
+                    text_node.replace_with(*parsed_new.contents)
+                else:
+                    text_node.replace_with(new_text)
                 
         if soup.body:
             return soup.body.decode_contents()
@@ -375,24 +381,68 @@ class ContentProcessor:
 
         return str(soup)
 
-    def _is_small_rendered_image(self, img_tag: BeautifulSoup) -> bool:
-        """检查图片是否为包含在 <a> 中的渲染尺寸较小的图片"""
-        if not img_tag.find_parent('a'):
+    # 邮件/网页中社交分享图标常见标记（alt 或 src）
+    _SOCIAL_IMAGE_HINTS = (
+        'share on', 'facebook', 'twitter', 'linkedin', 'instagram',
+        'threads', 'whatsapp', 'telegram', 'weibo', 'wechat',
+        'pinterest', 'reddit', 'tiktok', 'youtube',
+        'static_assets/header/', '/x.png', 'x_light', 'social',
+    )
+
+    def _declared_image_size_px(self, img_tag) -> Optional[int]:
+        """
+        从 width/height 属性或 style 中解析声明的最小渲染尺寸（px）。
+        无法判断时返回 None。
+        """
+        sizes = []
+        for attr in ('width', 'height'):
+            val = img_tag.get(attr)
+            if val is None:
+                continue
+            raw = str(val).strip().lower().replace('px', '')
+            if raw.isdigit():
+                sizes.append(int(raw))
+
+        style = (img_tag.get('style') or '').lower()
+        for match in re.findall(r'(?:max-)?(?:width|height)\s*:\s*(\d+(?:\.\d+)?)px', style):
+            try:
+                sizes.append(int(float(match)))
+            except ValueError:
+                continue
+
+        return min(sizes) if sizes else None
+
+    def _is_small_rendered_image(self, img_tag) -> bool:
+        """
+        判断是否为应剔除的装饰性小图（社交分享图标、跟踪像素等）。
+
+        说明：
+        邮件模版常写成 <a><table>...<img width=18></table></a>。
+        lxml 会把 table 从 a 中拆出，导致 img 不再有 a 祖先，仅靠
+        「在 a 内」的旧逻辑会漏掉 beehiiv 等 newsletter 的 Facebook/X 图标。
+        因此同时依据：声明尺寸、父级 a、alt/src 社交关键词。
+        """
+        size = self._declared_image_size_px(img_tag)
+        alt = (img_tag.get('alt') or '').lower()
+        src = (img_tag.get('src') or '').lower()
+        combined = f'{alt} {src}'
+
+        # 跟踪像素 / 1×1 打开回执
+        if size is not None and size <= 2:
+            return True
+
+        is_small = size is not None and size <= 32
+        if not is_small:
             return False
 
-        # 检查 width/height 属性
-        for attr in ['width', 'height']:
-            val = img_tag.get(attr)
-            if val and val.isdigit() and int(val) <= 32:
-                return True
+        # 经典路径：链接着的小图标
+        if img_tag.find_parent('a'):
+            return True
 
-        # 检查 style 属性
-        style = img_tag.get('style', '').lower()
-        if 'max-width' in style or 'width' in style:
-            matches = re.findall(r'(\d+)px', style)
-            for val in matches:
-                if int(val) <= 32:
-                    return True
+        # lxml 拆掉 a>table 后，靠 alt/src 识别社交图标
+        if any(hint in combined for hint in self._SOCIAL_IMAGE_HINTS):
+            return True
+
         return False
 
     def _clean_html(self, html: str, base_url: Optional[str] = None) -> str:
@@ -409,21 +459,30 @@ class ContentProcessor:
         """
         # === 全局预处理：将单行 <pre> 转换为行内 <code> ===
         # 问题根源：trafilatura 在提取 HTML 时，会把原始文章中的行内 <code> 标签
-        # 转换为 <pre> 标签（例如 sspai 等平台）。这些被错误转换的 <pre> 内容均为
-        # 单行文本（无换行符），在 EPUB 中会以代码块形式渲染，造成排版破碎。
-        # 解决方案：在所有其他处理之前，全局扫描内容不含换行符的 <pre> 标签，
-        # 将其转换回行内 <code>（若 <pre> 内已有 <code> 子标签，则仅 unwrap <pre>）。
-        # 真正的多行代码块（包含 \n）保留为 <pre>，不受影响。
+        # 转换为 <pre> 标签（例如 sspai 等平台）。这些被错误转换的 <pre> 内容在包含
+        # 首尾换行符或空白时（如 <pre><code>\ncmd\n</code></pre>），过去会被误判为
+        # 多行代码块，从而拆分段落 <p>，在 Kindle 上显示为强制换行。
+        # 解决方案：剥离首尾换行符后再检测内部是否包含换行。若内容为单行文本，
+        # 将其转换/unwrap 为行内 <code> 标签。真正的多行代码块（包含内部 \n）保留为 <pre>。
+        def _is_single_line_pre_content(inner: str) -> bool:
+            code_match = re.match(r'^\s*<code\b[^>]*>(.*?)</code>\s*$', inner, re.DOTALL | re.IGNORECASE)
+            if code_match:
+                text = code_match.group(1).strip('\r\n')
+            else:
+                text = inner.strip('\r\n ')
+            return not ('\n' in text or '\r' in text or '<br' in text.lower())
+
         def _convert_singleline_pre_to_code(m: re.Match) -> str:
             inner = m.group(1)
-            # 含换行符 → 保留为块级代码块
-            if '\n' in inner or '\r' in inner or '<br' in inner.lower():
+            if not _is_single_line_pre_content(inner):
                 return m.group(0)
-            # <pre><code...>...</code></pre> → 直接 unwrap pre
-            if re.match(r'^\s*<code\b', inner, re.IGNORECASE):
-                return inner.strip()
-            # <pre>单行内容</pre> → <code>内容</code>
-            return f'<code>{inner}</code>'
+            
+            code_match = re.match(r'^\s*<code\b([^>]*)>(.*?)</code>\s*$', inner, re.DOTALL | re.IGNORECASE)
+            if code_match:
+                attrs = code_match.group(1)
+                code_text = code_match.group(2).strip('\r\n')
+                return f'<code{attrs}>{code_text}</code>'
+            return f'<code>{inner.strip()}</code>'
 
         html = re.sub(
             r'<pre\b[^>]*>(.*?)</pre>',
@@ -481,11 +540,11 @@ class ContentProcessor:
             # 匹配所有 <pre>...</pre> 子块
             pre_blocks = list(re.finditer(r'<pre\b[^>]*>(.*?)</pre>', p_content, re.DOTALL | re.IGNORECASE))
             
-            # 判断是否所有嵌套的 <pre> 块都是单行的（即没有换行符或 <br>）
+            # 判断是否所有嵌套的 <pre> 块都是单行的（即没有内部换行符或 <br>）
             all_single_line = True
             for pb in pre_blocks:
                 inner = pb.group(1)
-                if '\n' in inner or '\r' in inner or '<br' in inner.lower():
+                if not _is_single_line_pre_content(inner):
                     all_single_line = False
                     break
             
@@ -520,6 +579,10 @@ class ContentProcessor:
             return "".join(res)
 
         html = p_pattern.sub(replace_pre_inside_p, html)
+
+        # 清除行内 code 标签紧邻的前后换行符，防止在 Kindle 等阅读器中强制换行
+        html = re.sub(r'[\r\n]+\s*(<code\b)', r'\1', html)
+        html = re.sub(r'(</code>)\s*[\r\n]+', r'\1', html)
 
         soup = BeautifulSoup(html, 'lxml')
 
@@ -574,12 +637,20 @@ class ContentProcessor:
         # === 布局清洗：将复杂的、嵌套的邮件/网页模版表格拆解为普通文本流 ===
         self._unwrap_layout_tables(soup)
 
-        # === 预过滤：移除被包含在 <a> 中的社交小图标 ===
-        for img in soup.find_all('img'):
+        # === 预过滤：移除社交分享小图标与跟踪像素 ===
+        for img in list(soup.find_all('img')):
             if self._is_small_rendered_image(img):
                 parent_a = img.find_parent('a')
                 if parent_a:
-                    parent_a.decompose()
+                    # 若链接内只剩该图标（无其它图、无文字），整段分享链接一起删
+                    other_imgs = [c for c in parent_a.find_all('img') if c is not img]
+                    other_text = parent_a.get_text(strip=True)
+                    if not other_imgs and not other_text:
+                        parent_a.decompose()
+                    else:
+                        img.decompose()
+                else:
+                    img.decompose()
 
         # === EPUB 验证修复规则 ===
 
@@ -733,6 +804,28 @@ class ContentProcessor:
                 # 限制 width/height 属性只能在 img 标签上保留，防止复杂的表格固定宽度导致挤压
                 elif attr in ('width', 'height') and tag.name != 'img':
                     del tag[attr]
+
+        # === 对话者/采访人姓名加粗增强 ===
+        # 扫描段落 <p> 中以 "Speaker Name:" 开头但未被 <strong>/<b> 包裹的对话者标识并进行加粗
+        speaker_pattern = re.compile(r'^([A-Z\u4e00-\u9fa5][A-Za-z0-9\u4e00-\u9fa5\s\.\-–—]{0,30}[:：])(.*|$)')
+        skip_prefixes = {"http:", "https:", "ftp:", "file:", "note:", "url:"}
+        from bs4 import NavigableString, Tag
+        for p in soup.find_all('p'):
+            if not p.contents:
+                continue
+            first_child = p.contents[0]
+            if isinstance(first_child, NavigableString) and not isinstance(first_child, Tag):
+                text_str = str(first_child)
+                m = speaker_pattern.match(text_str)
+                if m:
+                    speaker_part = m.group(1)
+                    if speaker_part.lower() not in skip_prefixes:
+                        rest_part = text_str[len(speaker_part):]
+                        strong_tag = soup.new_tag('strong')
+                        strong_tag.string = speaker_part
+                        first_child.replace_with(strong_tag)
+                        if rest_part:
+                            strong_tag.insert_after(rest_part)
 
         # 仅返回 body 内部的内容，避免产生嵌套 of html/body 标签
         if soup.body:

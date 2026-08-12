@@ -78,7 +78,7 @@ class DedupTracker:
             if not self.new_ids:
                 self.logger.info("No new content to save")
                 return
-            ids_to_save = list(self.new_ids)
+            ids_to_save = set(self.new_ids)
 
         try:
             # 确保目录存在
@@ -92,7 +92,7 @@ class DedupTracker:
             self.logger.info(f"Saved {len(ids_to_save)} new content IDs")
 
             with self._lock:
-                self.new_ids.clear()
+                self.new_ids.difference_update(ids_to_save)
 
             # 超过上限时自动清理旧记录
             self._cleanup_if_needed()
@@ -132,9 +132,9 @@ class DedupTracker:
                     f.write(f"{line}\n")
 
             removed = len(lines) - len(kept)
-            # 同步内存中的 set，避免后续判断与文件不一致
+            # 同步内存中的 set，避免后续判断与文件不一致；保留尚未落盘的 new_ids
             with self._lock:
-                self.fetched_ids = set(kept)
+                self.fetched_ids = set(kept).union(self.new_ids)
             self.logger.info(f"Dedup cleanup: removed {removed} old records, kept {len(kept)}")
 
         except Exception as e:

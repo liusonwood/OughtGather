@@ -7,6 +7,7 @@ Ought Gather 主入口
 import argparse
 import sys
 import os
+import copy
 import re
 import time
 import concurrent.futures
@@ -34,8 +35,8 @@ from src.utils.logger import (
     log_summary_table,
 )
 
-# 纯文本最少字符数；低于此阈值且无图片则视为无效正文
-_MIN_PLAIN_TEXT_LEN = 15
+# 纯文本最少字符数；只要有字（>=1）或包含图片即视为有效正文
+_MIN_PLAIN_TEXT_LEN = 1
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -62,9 +63,9 @@ def has_valid_content(article: Article) -> bool:
     判断文章是否具备可推送的有效正文。
 
     规则：
-    - content 为空 / 仅空白 → 无效
-    - 去掉 HTML 标签后的纯文本长度 >= 15 → 有效
-    - 纯文本很短，但存在图片（article.images 或 content 内含 <img>）→ 有效
+    - content 为空 / 仅空白 / 仅无意义空标签 → 无效
+    - 去掉 HTML 标签后的纯文本长度 >= 1（只要有字）→ 有效
+    - 纯文本为空，但存在图片（article.images 或 content 内含 <img>）→ 有效
     """
     if not article.content or not str(article.content).strip():
         return False
@@ -125,13 +126,15 @@ def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[F
                 continue
 
             # 先做内容处理，再判断是否有效；处理失败则保留原文再校验
+            orig_article = copy.deepcopy(article)
             try:
                 processor = ContentProcessor(result.source)
-                article = processor.process(article)
+                article = processor.process(copy.deepcopy(orig_article))
             except Exception as e:
                 logger.error(
-                    f"[{prefix}] 处理文章 '{article.title}' 失败: {e}，保留原始文章内容"
+                    f"[{prefix}] 处理文章 '{orig_article.title}' 失败: {e}，保留原始文章内容"
                 )
+                article = orig_article
 
             if not has_valid_content(article):
                 skipped_empty += 1

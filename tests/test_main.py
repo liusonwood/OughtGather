@@ -21,17 +21,17 @@ class TestHasValidContent:
         assert has_valid_content(article) is False
 
     def test_short_plain_text_no_images(self):
-        # 去掉标签后不足 15 字符，且无图片
+        # 只要有字（例如仅 1 个字），无图片也判定为有效正文
         article = Article(
             title="t",
             content="<p>短</p>",
             url="https://example.com/a",
         )
-        assert has_valid_content(article) is False
+        assert has_valid_content(article) is True
 
     def test_plain_text_at_threshold(self):
-        # 恰好 15 个非空白字符
-        plain = "a" * 15
+        # 恰好 1 个非空白字符
+        plain = "a"
         article = Article(title="t", content=plain, url="https://example.com/a")
         assert has_valid_content(article) is True
 
@@ -152,10 +152,10 @@ class TestProcessResultsValidContent:
         tracker.mark_as_fetched.assert_not_called()
 
     @patch("src.main.ContentProcessor")
-    def test_short_text_without_images_skipped(self, mock_cp_cls):
+    def test_empty_text_without_images_skipped(self, mock_cp_cls):
         source = self._source()
-        short = self._article("过短", "<p>hi</p>")
-        result = FetchResult(source=source, articles=[short], success=True)
+        empty = self._article("空壳", "<p></p>")
+        result = FetchResult(source=source, articles=[empty], success=True)
 
         mock_processor = MagicMock()
         mock_processor.process.side_effect = lambda a: a
@@ -196,7 +196,7 @@ class TestProcessResultsValidContent:
         source = self._source()
         valid = self._article("好文章", "这是足够长的正文内容，应当推送并标记去重记录。")
         empty = self._article("空壳", "")
-        short = self._article("过短", "x")
+        short = self._article("简短", "x")
         result = FetchResult(
             source=source, articles=[valid, empty, short], success=True
         )
@@ -210,9 +210,9 @@ class TestProcessResultsValidContent:
 
         out = process_results([result], tracker)
 
-        assert len(out[0].articles) == 1
-        assert out[0].articles[0].title == "好文章"
-        tracker.mark_as_fetched.assert_called_once_with(valid.url)
+        assert len(out[0].articles) == 2
+        assert [a.title for a in out[0].articles] == ["好文章", "简短"]
+        assert tracker.mark_as_fetched.call_count == 2
 
     @patch("src.main.ContentProcessor")
     def test_already_fetched_skipped(self, mock_cp_cls):
@@ -267,6 +267,34 @@ class TestProcessResultsValidContent:
         out = process_results([result], tracker)
 
         assert len(out[0].articles) == 1
+        tracker.mark_as_fetched.assert_called_once()
+
+    @patch("src.main.ContentProcessor")
+    def test_processor_exception_with_mutation_keeps_clean_raw(self, mock_cp_cls):
+        """测试当ContentProcessor在处理中修改了article对象，但最终抛出异常，依然能恢复未受污染的原文章。"""
+        source = self._source()
+        valid_raw = self._article(
+            "被修改文章",
+            "原始 HTML 正文足够长，即便 ContentProcessor 抛错也应被保留。",
+        )
+        result = FetchResult(source=source, articles=[valid_raw], success=True)
+
+        def mutating_process(art):
+            art.content = "被污染的内容"
+            raise RuntimeError("mutating boom")
+
+        mock_processor = MagicMock()
+        mock_processor.process.side_effect = mutating_process
+        mock_cp_cls.return_value = mock_processor
+
+        tracker = MagicMock()
+        tracker.is_fetched.return_value = False
+
+        out = process_results([result], tracker)
+
+        assert len(out[0].articles) == 1
+        # 原文章内容没有被修改为"被污染的内容"
+        assert "原始 HTML" in out[0].articles[0].content
         tracker.mark_as_fetched.assert_called_once()
 
     @patch("src.main.ContentProcessor")

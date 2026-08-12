@@ -157,9 +157,20 @@ class MailFetcher(BaseFetcher):
             }
         )
 
+    # 与 ContentProcessor 对齐：邮件头/尾社交分享图标关键词
+    _SOCIAL_IMAGE_HINTS = (
+        'share on', 'facebook', 'twitter', 'linkedin', 'instagram',
+        'threads', 'whatsapp', 'telegram', 'weibo', 'wechat',
+        'pinterest', 'reddit', 'tiktok', 'youtube',
+        'static_assets/header/', '/x.png', 'x_light', 'social',
+    )
+
     def _extract_images(self, html: str) -> List[str]:
         """
-        从 HTML 中提取图片 URL
+        从 HTML 中提取图片 URL，并跳过社交分享图标与跟踪像素。
+
+        邮件 HTML 开头常见 Facebook/X/LinkedIn 等 18px 分享图标；
+        若不过滤，会成为 article.images 首图并被 ContentProcessor 当作 lead image 插入。
 
         Args:
             html: HTML 内容
@@ -177,10 +188,52 @@ class MailFetcher(BaseFetcher):
 
         for img in soup.find_all('img'):
             src = img.get('src')
-            if src:
-                images.append(src)
+            if not src or src.startswith('data:image'):
+                continue
+            if self._is_decorative_mail_image(img):
+                continue
+            images.append(src)
 
         return images
+
+    def _is_decorative_mail_image(self, img) -> bool:
+        """判断邮件中的社交图标 / 跟踪像素等装饰图。"""
+        sizes = []
+        for attr in ('width', 'height'):
+            val = img.get(attr)
+            if val is None:
+                continue
+            raw = str(val).strip().lower().replace('px', '')
+            if raw.isdigit():
+                sizes.append(int(raw))
+
+        style = (img.get('style') or '').lower()
+        for match in re.findall(r'(?:max-)?(?:width|height)\s*:\s*(\d+(?:\.\d+)?)px', style):
+            try:
+                sizes.append(int(float(match)))
+            except ValueError:
+                pass
+
+        size = min(sizes) if sizes else None
+        alt = (img.get('alt') or '').lower()
+        src = (img.get('src') or '').lower()
+        combined = f'{alt} {src}'
+
+        # 跟踪像素
+        if size is not None and size <= 2:
+            return True
+
+        is_small = size is not None and size <= 32
+        if not is_small:
+            return False
+
+        if img.find_parent('a'):
+            return True
+
+        if any(hint in combined for hint in self._SOCIAL_IMAGE_HINTS):
+            return True
+
+        return False
 
     def _apply_content_rules(self, html: str) -> str:
         """

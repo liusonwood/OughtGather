@@ -567,6 +567,50 @@ class TestMailFetcher:
         assert "limit=10" in api_url
         assert "timestamp_from=1718300000000" in api_url
 
+    @patch.dict("os.environ", {"TESTMAIL_APP_API_KEY": "test_key_123"})
+    def test_extract_images_skips_social_and_tracking(self):
+        """邮件头社交图标与 1x1 跟踪像素不应进入 article.images"""
+        source = ContentSource(type="mail", src="ns.tag")
+        fetcher = MailFetcher(source)
+        html = """
+        <html><body>
+          <img alt="share on facebook" width="18"
+               src="https://media.example.com/static_assets/header/facebook.png"
+               style="width:18px;height:18px">
+          <img alt="share on twitter" width="18"
+               src="https://media.example.com/static_assets/header/x.png">
+          <img src="https://track.example.com/o/pixel.gif" width="1" height="1">
+          <img src="https://cdn.example.com/article-hero.jpg" width="630" alt="hero">
+        </body></html>
+        """
+        images = fetcher._extract_images(html)
+        assert images == ["https://cdn.example.com/article-hero.jpg"]
+
+    @patch.dict("os.environ", {"TESTMAIL_APP_API_KEY": "test_key_123"})
+    def test_parse_email_filters_social_from_image_list(self):
+        """_parse_email 提取的 images 不应以社交图标为首图"""
+        source = ContentSource(type="mail", src="ns.tag")
+        fetcher = MailFetcher(source)
+        email = {
+            "subject": "Newsletter",
+            "from": "news@example.com",
+            "to": "me@testmail.app",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "html": """
+            <html><body>
+              <img alt="share on facebook" width="18"
+                   src="https://media.beehiiv.com/static_assets/header/facebook.png">
+              <img src="https://cdn.example.com/real-content.png" width="630">
+              <p>Hello</p>
+            </body></html>
+            """,
+            "attachments": [],
+        }
+        article = fetcher._parse_email(email)
+        assert article.images
+        assert "facebook.png" not in article.images[0]
+        assert any("real-content.png" in u for u in article.images)
+
 
 # =========================================================================
 # TrendingFetcher 测试
@@ -714,7 +758,7 @@ class TestTrendingFetcher:
         assert "<h3>Header 3</h3>" not in result.articles[0].content # 并从正文中去除
         assert "This is the third content body." in result.articles[0].content
 
-        # Case 4: 带自定义标题
+        # Case 4: 带自定义标题 (自定义标题仅作为大章节标题，不覆盖从 AI 回复中提取的文章标题)
         source_with_title = ContentSource(type="trending", src="AI 趋势", goal="分析 AI", title="Custom Title Override")
         fetcher_with_title = TrendingFetcher(source_with_title)
         mock_response.json.return_value = {
@@ -728,9 +772,17 @@ class TestTrendingFetcher:
         }
         result = fetcher_with_title.fetch()
         assert result.success is True
-        assert result.articles[0].title == "Custom Title Override"  # 自定义标题覆盖提取出的标题
+        assert result.articles[0].title == "Extracted Title 4"  # 优先使用 AI 回复提取出的文章标题，不被 source.title 覆盖
         assert "<h1>Extracted Title 4</h1>" not in result.articles[0].content  # 但第一行仍应从正文中去除
         assert "Content details." in result.articles[0].content
+
+        # Case 5: 带自定义标题但 AI 未能提取出文章标题
+        source_no_extracted = ContentSource(type="trending", src="AI 趋势", goal="分析 AI", title="Custom Section Title")
+        fetcher_no_extracted = TrendingFetcher(source_no_extracted)
+        with patch("src.fetchers.trending_fetcher.TrendingFetcher._call_llm_api", return_value=("<p>内容</p>", "test-model", None)):
+            result = fetcher_no_extracted.fetch()
+            assert result.success is True
+            assert result.articles[0].title == "热点分析: AI 趋势"
 
     @patch.dict("os.environ", {"OPENROUTER_API_KEY": "test_key_456"})
     def test_format_as_html_paragraphs(self, trending_source):

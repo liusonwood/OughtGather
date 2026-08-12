@@ -4,6 +4,7 @@
 """
 
 import pytest
+from unittest.mock import MagicMock, patch
 from bs4 import BeautifulSoup
 
 from src.config import ContentSource
@@ -48,6 +49,21 @@ class TestExcludeStart:
         assert "内容A" in result.content
         assert "内容B" in result.content
 
+    def test_exclude_start_with_empty_remaining_text(self):
+        """测试 start 关键词删除后, 如果没有剩余文本, 目标文本节点会被 extract 而非保留空文本节点"""
+        source = ContentSource(
+            type="rss", src="https://example.com/rss",
+            exclude=[{"type": "start", "value": "全部文本"}],
+        )
+        processor = ContentProcessor(source)
+        html = "<div><p>全部文本</p></div>"
+        article = _make_article(html)
+        result = processor.process(article)
+        
+        soup = BeautifulSoup(result.content, 'lxml')
+        text_nodes = list(soup.find_all(string=True))
+        assert len(text_nodes) == 0
+
     def test_start_with_html_tags(self):
         """start 关键词包含 HTML 标签的情况"""
         source = ContentSource(
@@ -89,6 +105,21 @@ class TestExcludeEnd:
         result = processor.process(article)
         assert "内容A" in result.content
         assert "内容B" in result.content
+
+    def test_exclude_end_with_empty_remaining_text(self):
+        """测试 end 关键词删除后, 如果没有剩余文本, 目标文本节点会被 extract 而非保留空文本节点"""
+        source = ContentSource(
+            type="rss", src="https://example.com/rss",
+            exclude=[{"type": "end", "value": "全部文本"}],
+        )
+        processor = ContentProcessor(source)
+        html = "<div><p>全部文本</p></div>"
+        article = _make_article(html)
+        result = processor.process(article)
+        
+        soup = BeautifulSoup(result.content, 'lxml')
+        text_nodes = list(soup.find_all(string=True))
+        assert len(text_nodes) == 0
 
     def test_end_uses_rfind(self):
         """end 应使用 rfind（匹配最后一次出现）"""
@@ -324,7 +355,7 @@ class TestCleanHtml:
                     <img src="big.png" width="50" height="50">
                 </a>
                 
-                <!-- 场景 3: 应被保留 (孤立 16px img) -->
+                <!-- 场景 3: 应被保留 (孤立 16px img，无社交关键词) -->
                 <img src="standalone.png" width="16">
             </body>
         </html>
@@ -344,6 +375,48 @@ class TestCleanHtml:
         
         # 场景 3 应该存在
         assert soup.find('img', src="standalone.png")
+
+    def test_filter_beehiiv_style_social_icons_without_a_parent(self):
+        """
+        beehiiv 等邮件模版：<a> 包裹 table/img 时，lxml 会拆掉 a 与 img 的父子关系。
+        即使没有 a 祖先，声明尺寸 + alt/src 社交关键词也应过滤。
+        """
+        source = ContentSource(type="mail", src="ns.tag")
+        processor = ContentProcessor(source)
+        # 模拟 lxml 拆解后的结构：img 不在 a 内
+        html = """
+        <html><body>
+          <a href="https://facebook.com/share"></a>
+          <table>
+            <tr><td>
+              <img alt="share on facebook" width="18"
+                   src="https://media.beehiiv.com/static_assets/header/facebook.png"
+                   style="width: 18px; height: 18px; max-width: 18px;">
+            </td></tr>
+            <tr><td>
+              <img alt="share on twitter" width="18"
+                   src="https://media.beehiiv.com/static_assets/header/x.png"
+                   style="width:18px;height:18px">
+            </td></tr>
+            <tr><td>
+              <img alt="share on linkedin" width="18"
+                   src="https://media.beehiiv.com/static_assets/header/linkedin.png">
+            </td></tr>
+          </table>
+          <img src="https://example.com/content-hero.png" width="630" alt="article">
+          <img src="https://example.com/track.gif" width="1" height="1" alt="">
+        </body></html>
+        """
+        article = _make_article(html)
+        result = processor.process(article)
+        soup = BeautifulSoup(result.content, 'lxml')
+        srcs = [img.get('src', '') for img in soup.find_all('img')]
+
+        assert not any('facebook.png' in s for s in srcs)
+        assert not any('/x.png' in s or s.endswith('x.png') for s in srcs)
+        assert not any('linkedin.png' in s for s in srcs)
+        assert not any('track.gif' in s for s in srcs)
+        assert any('content-hero.png' in s for s in srcs)
 
 
 # =========================================================================
@@ -594,11 +667,36 @@ class TestEmojiProcessing:
         assert "Hello" in result.content
         assert "World" in result.content
 
+    def test_wrap_emojis_when_body_contents_empty(self):
+        """测试 wrap_emojis 当 BeautifulSoup 解析体为空时不会误删文本节点"""
+        real_bs = BeautifulSoup
+        def bs_side_effect(text, parser="lxml"):
+            if 'span class="emoji"' in str(text):
+                m = MagicMock()
+                m.body = None
+                return m
+            return real_bs(text, parser)
+
+        with patch("src.processors.content_processor.BeautifulSoup", side_effect=bs_side_effect):
+            res = ContentProcessor.wrap_emojis("<p>Hello 😀</p>")
+            assert "Hello" in res
+
     def test_render_text_with_emojis_escapes_text_and_uses_local_image(self):
         rendered = ContentProcessor.render_text_with_emojis("标题 📰 <测试>")
 
         assert 'src="images/emoji_1f4f0.png"' in rendered
         assert "&lt;测试&gt;" in rendered
+
+    def test_lead_image_insertion_when_body_is_none(self):
+        """测试当 soup.body 为 None 时，也能正确嵌入首图而非放到 html 外"""
+        source = ContentSource(type="rss", src="https://example.com/rss")
+        processor = ContentProcessor(source)
+        
+        html = "<html><head><title>Test</title></head></html>"
+        article = Article(title="Test", content=html, url="https://example.com", images=["https://example.com/lead.jpg"])
+        
+        result = processor.process(article)
+        assert '<p><img alt="Lead Image" src="https://example.com/lead.jpg"/></p>' in result.content
 
 class TestLayoutTableCleaning:
     """测试邮件布局表格与样式清洗行为"""
@@ -881,4 +979,42 @@ class TestNestedPreInParagraphOrInline:
         article = _make_article(html)
         result = processor.process(article)
         assert '<pre>def foo():\n    pass</pre>' in result.content
+
+    def test_singleline_pre_with_newlines_inside_converts_to_code(self):
+        """测试包含首尾换行符的单行 <pre><code> 标签转换行内 <code> 且不拆分 <p>"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = '<p>建议先执行一次<pre><code>\npkg update && pkg upgrade -y\n</code></pre>命令</p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        assert '<p>建议先执行一次<code>pkg update &amp;&amp; pkg upgrade -y</code>命令</p>' in result.content
+
+    def test_newlines_around_code_tags_removed(self):
+        """测试清除行内 code 标签紧邻的前后换行符，确保行内连续显示"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = '<p>建议先执行一次\n<code>pkg update && pkg upgrade -y</code>\n命令</p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        assert '<p>建议先执行一次<code>pkg update &amp;&amp; pkg upgrade -y</code>命令</p>' in result.content
+
+    def test_exclude_applied_after_clean_html_and_keep_link(self):
+        """测试 exclude 规则在 HTML 清洗和 keep_link 规则之后应用"""
+        source = ContentSource(
+            type="rss",
+            src="https://example.com/rss",
+            keep_link="N",
+            exclude=[{"type": "exact", "value": "<p>广告</p>"}],
+        )
+        processor = ContentProcessor(source)
+        # 原始 HTML 中包含 <a> 标签：<p><a href="https://ad.com">广告</a></p>
+        # 1. clean_html 清洗 HTML
+        # 2. keep_link="N" 移除 <a> 标签，使其变为 <p>广告</p>
+        # 3. exclude 规则匹配 exact "<p>广告</p>" 并成功将其移除
+        html = '<p>正文内容</p><p><a href="https://ad.com">广告</a></p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        assert "广告" not in result.content
+        assert "正文内容" in result.content
+
 

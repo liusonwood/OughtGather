@@ -141,7 +141,8 @@ class TrendingFetcher(BaseFetcher):
 
             # 创建文章对象（带当日时间戳，用于去重哈希计算）
             # 作者使用实际调用的 LLM 模型名称
-            title = self.source.title or extracted_title or f"热点分析: {self.source.src}"
+            # 文章标题优先从 AI 回复中提取（extracted_title），自定义标题 (self.source.title) 仅作为 EPUB 大章节标题
+            title = extracted_title or f"热点分析: {self.source.src}"
             today = get_now().strftime("%Y-%m-%d")
             article = Article(
                 title=title,

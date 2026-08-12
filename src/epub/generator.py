@@ -456,9 +456,9 @@ class EPUBGenerator:
 
         # 添加元信息
         if safe_author:
-            content_html += f"<p class='author'>作者: {safe_author}</p>"
+            content_html += f"<p class='author'>Author/作者: {safe_author}</p>"
         if article.published_date:
-            content_html += f"<p class='date'>日期: {article.published_date}</p>"
+            content_html += f"<p class='date'>Date/日期: {article.published_date}</p>"
 
         # 添加正文（正文已经由 ContentProcessor 处理过，应该是安全的 HTML 片段）
         content_html += f"<div class='content'>{article.content}</div>"
@@ -497,14 +497,16 @@ class EPUBGenerator:
         src = None
         remote_attrs = ['data-src', 'data-original', 'data-actualsrc', 'data-lazy-src', 'srcset', 'data-srcset', 'file', 'zoom-target', 'original']
         
-        # 检查 srcset (Bug 4)
+        # 检查 srcset
         srcset = img.get('data-srcset') or img.get('srcset')
         if srcset:
             candidates = []
             for part in srcset.split(','):
                 parts = part.strip().split()
                 if parts:
-                    candidates.append(parts[0])
+                    url = parts[0]
+                    if not any(ext in url.lower() for ext in ['.gif', '.svg']) and not url.lower().startswith('data:'):
+                        candidates.append(url)
             if candidates:
                 src = candidates[-1]
         
@@ -518,6 +520,8 @@ class EPUBGenerator:
         
         if not src:
             src = img.get('src')
+            if src and (any(ext in src.lower() for ext in ['.gif', '.svg']) or src.lower().startswith('data:')):
+                src = None
             
         return src, remote_attrs
 
@@ -941,6 +945,12 @@ body {
     line-height: 1.6;
     margin: 1em;
 }
+strong, b {
+    font-weight: bold;
+}
+em, i {
+    font-style: italic;
+}
 h1 {
     font-size: 1.5em;
     font-weight: bold;
@@ -1014,12 +1024,11 @@ code {
     font-family: monospace;
     font-size: 0.85em;
     background-color: #f5f5f5;
-    padding: 1px 3px;
-    border-radius: 3px;
+    padding: 0 2px;
     display: inline !important;
     white-space: normal;
     word-wrap: break-word;
-    word-break: break-all;
+    word-break: break-word;
 }
 pre {
     font-family: monospace;
