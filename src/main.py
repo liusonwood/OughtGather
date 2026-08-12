@@ -34,8 +34,8 @@ from src.utils.logger import (
     log_summary_table,
 )
 
-# 纯文本最少字符数；低于此阈值且无图片则视为无效正文
-_MIN_PLAIN_TEXT_LEN = 15
+# 纯文本最少字符数；只要有字（>=1）或包含图片即视为有效正文
+_MIN_PLAIN_TEXT_LEN = 1
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -62,9 +62,9 @@ def has_valid_content(article: Article) -> bool:
     判断文章是否具备可推送的有效正文。
 
     规则：
-    - content 为空 / 仅空白 → 无效
-    - 去掉 HTML 标签后的纯文本长度 >= 15 → 有效
-    - 纯文本很短，但存在图片（article.images 或 content 内含 <img>）→ 有效
+    - content 为空 / 仅空白 / 仅无意义空标签 → 无效
+    - 去掉 HTML 标签后的纯文本长度 >= 1（只要有字）→ 有效
+    - 纯文本为空，但存在图片（article.images 或 content 内含 <img>）→ 有效
     """
     if not article.content or not str(article.content).strip():
         return False
