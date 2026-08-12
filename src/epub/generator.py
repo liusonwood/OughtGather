@@ -941,6 +941,12 @@ body {
     line-height: 1.6;
     margin: 1em;
 }
+strong, b {
+    font-weight: bold;
+}
+em, i {
+    font-style: italic;
+}
 h1 {
     font-size: 1.5em;
     font-weight: bold;

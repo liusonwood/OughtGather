@@ -440,6 +440,7 @@ class BaseFetcher(ABC):
                     include_tables=True,
                     include_images=True,
                     include_links=True,
+                    include_formatting=True,
                     output_format="html"
                 )
 
