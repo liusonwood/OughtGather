@@ -21,7 +21,7 @@ def generate_toc_link(target_id: str) -> str:
     Returns:
         str: HTML 片段
     """
-    return f'<p class=\"toc-link\"><a href=\"contents.xhtml#{target_id}\">Back / 返回目录</a></p>'
+    return f'<p class=\"toc-link\"><a href=\"contents.xhtml#{target_id}\">Back/返回目录</a></p>'
 
 
 def create_section_divider_page(

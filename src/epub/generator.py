@@ -456,9 +456,9 @@ class EPUBGenerator:
 
         # 添加元信息
         if safe_author:
-            content_html += f"<p class='author'>作者: {safe_author}</p>"
+            content_html += f"<p class='author'>Author/作者: {safe_author}</p>"
         if article.published_date:
-            content_html += f"<p class='date'>日期: {article.published_date}</p>"
+            content_html += f"<p class='date'>Date/日期: {article.published_date}</p>"
 
         # 添加正文（正文已经由 ContentProcessor 处理过，应该是安全的 HTML 片段）
         content_html += f"<div class='content'>{article.content}</div>"
