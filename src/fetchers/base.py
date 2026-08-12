@@ -119,6 +119,14 @@ class BaseFetcher(ABC):
         self.global_limit = global_limit
         self.max_retries = max_retries
         self.logger = get_logger()
+        self._client = None
+
+    def __del__(self):
+        try:
+            if hasattr(self, '_client') and self._client and not self._client.is_closed:
+                self._client.close()
+        except Exception:
+            pass
 
     def get_limit(self) -> int:
         """
@@ -249,11 +257,14 @@ class BaseFetcher(ABC):
         if headers:
             default_headers.update(headers)
 
-        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
-            response = client.request(method, url, headers=default_headers)
-            response.raise_for_status()
-            response.read()  # 确保在客户端关闭前读取响应体
-            return response
+        if not hasattr(self, '_client') or self._client is None or self._client.is_closed:
+            limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
+            self._client = httpx.Client(timeout=timeout, follow_redirects=True, limits=limits)
+
+        response = self._client.request(method, url, headers=default_headers, timeout=timeout)
+        response.raise_for_status()
+        response.read()  # 确保读取响应体
+        return response
 
 
     def _resolve_url(self, url: str, base_url: Optional[str] = None) -> str:
