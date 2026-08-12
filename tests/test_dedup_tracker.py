@@ -161,6 +161,28 @@ class TestDedupTrackerPersistence:
         tracker = DedupTracker(data_file)
         assert len(tracker.fetched_ids) == 0
 
+    def test_concurrent_mark_and_save(self, tmp_dir):
+        """并发 mark_as_fetched、is_fetched 与 save 的线程安全性测试"""
+        import concurrent.futures
+        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
+        tracker = DedupTracker(data_file)
+
+        def worker(i):
+            url = f"https://example.com/item_{i}"
+            tracker.mark_as_fetched(url)
+            assert tracker.is_fetched(url) is True
+            if i % 10 == 0:
+                tracker.save()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(worker, i) for i in range(100)]
+            for f in futures:
+                f.result()
+
+        tracker.save()
+        stats = tracker.get_stats()
+        assert stats["total_fetched"] == 100
+
 
 # =========================================================================
 # 统计与清理测试
