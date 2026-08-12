@@ -112,7 +112,10 @@ class ContentProcessor:
                 new_text = emoji_pattern.sub(r'<span class="emoji">\1</span>', str(text_node))
                 # 重新解析含有 span 的字符串片段，并将所有内容替换回文本节点
                 parsed_new = BeautifulSoup(new_text, 'lxml').body
-                text_node.replace_with(*parsed_new.contents)
+                if parsed_new and parsed_new.contents:
+                    text_node.replace_with(*parsed_new.contents)
+                else:
+                    text_node.replace_with(new_text)
                 
         if soup.body:
             return soup.body.decode_contents()

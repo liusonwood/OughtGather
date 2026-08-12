@@ -4,6 +4,7 @@
 """
 
 import pytest
+from unittest.mock import MagicMock, patch
 from bs4 import BeautifulSoup
 
 from src.config import ContentSource
@@ -635,6 +636,20 @@ class TestEmojiProcessing:
         # 验证文本内容是否正确
         assert "Hello" in result.content
         assert "World" in result.content
+
+    def test_wrap_emojis_when_body_contents_empty(self):
+        """测试 wrap_emojis 当 BeautifulSoup 解析体为空时不会误删文本节点"""
+        real_bs = BeautifulSoup
+        def bs_side_effect(text, parser="lxml"):
+            if 'span class="emoji"' in str(text):
+                m = MagicMock()
+                m.body = None
+                return m
+            return real_bs(text, parser)
+
+        with patch("src.processors.content_processor.BeautifulSoup", side_effect=bs_side_effect):
+            res = ContentProcessor.wrap_emojis("<p>Hello 😀</p>")
+            assert "Hello" in res
 
     def test_render_text_with_emojis_escapes_text_and_uses_local_image(self):
         rendered = ContentProcessor.render_text_with_emojis("标题 📰 <测试>")
