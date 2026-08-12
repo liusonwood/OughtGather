@@ -758,7 +758,7 @@ class TestTrendingFetcher:
         assert "<h3>Header 3</h3>" not in result.articles[0].content # 并从正文中去除
         assert "This is the third content body." in result.articles[0].content
 
-        # Case 4: 带自定义标题
+        # Case 4: 带自定义标题 (自定义标题仅作为大章节标题，不覆盖从 AI 回复中提取的文章标题)
         source_with_title = ContentSource(type="trending", src="AI 趋势", goal="分析 AI", title="Custom Title Override")
         fetcher_with_title = TrendingFetcher(source_with_title)
         mock_response.json.return_value = {
@@ -772,9 +772,17 @@ class TestTrendingFetcher:
         }
         result = fetcher_with_title.fetch()
         assert result.success is True
-        assert result.articles[0].title == "Custom Title Override"  # 自定义标题覆盖提取出的标题
+        assert result.articles[0].title == "Extracted Title 4"  # 优先使用 AI 回复提取出的文章标题，不被 source.title 覆盖
         assert "<h1>Extracted Title 4</h1>" not in result.articles[0].content  # 但第一行仍应从正文中去除
         assert "Content details." in result.articles[0].content
+
+        # Case 5: 带自定义标题但 AI 未能提取出文章标题
+        source_no_extracted = ContentSource(type="trending", src="AI 趋势", goal="分析 AI", title="Custom Section Title")
+        fetcher_no_extracted = TrendingFetcher(source_no_extracted)
+        with patch("src.fetchers.trending_fetcher.TrendingFetcher._call_llm_api", return_value=("<p>内容</p>", "test-model", None)):
+            result = fetcher_no_extracted.fetch()
+            assert result.success is True
+            assert result.articles[0].title == "热点分析: AI 趋势"
 
     @patch.dict("os.environ", {"OPENROUTER_API_KEY": "test_key_456"})
     def test_format_as_html_paragraphs(self, trending_source):
