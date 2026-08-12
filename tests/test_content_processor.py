@@ -49,6 +49,21 @@ class TestExcludeStart:
         assert "内容A" in result.content
         assert "内容B" in result.content
 
+    def test_exclude_start_with_empty_remaining_text(self):
+        """测试 start 关键词删除后, 如果没有剩余文本, 目标文本节点会被 extract 而非保留空文本节点"""
+        source = ContentSource(
+            type="rss", src="https://example.com/rss",
+            exclude=[{"type": "start", "value": "全部文本"}],
+        )
+        processor = ContentProcessor(source)
+        html = "<div><p>全部文本</p></div>"
+        article = _make_article(html)
+        result = processor.process(article)
+        
+        soup = BeautifulSoup(result.content, 'lxml')
+        text_nodes = list(soup.find_all(string=True))
+        assert len(text_nodes) == 0
+
     def test_start_with_html_tags(self):
         """start 关键词包含 HTML 标签的情况"""
         source = ContentSource(
@@ -90,6 +105,21 @@ class TestExcludeEnd:
         result = processor.process(article)
         assert "内容A" in result.content
         assert "内容B" in result.content
+
+    def test_exclude_end_with_empty_remaining_text(self):
+        """测试 end 关键词删除后, 如果没有剩余文本, 目标文本节点会被 extract 而非保留空文本节点"""
+        source = ContentSource(
+            type="rss", src="https://example.com/rss",
+            exclude=[{"type": "end", "value": "全部文本"}],
+        )
+        processor = ContentProcessor(source)
+        html = "<div><p>全部文本</p></div>"
+        article = _make_article(html)
+        result = processor.process(article)
+        
+        soup = BeautifulSoup(result.content, 'lxml')
+        text_nodes = list(soup.find_all(string=True))
+        assert len(text_nodes) == 0
 
     def test_end_uses_rfind(self):
         """end 应使用 rfind（匹配最后一次出现）"""
