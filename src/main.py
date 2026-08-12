@@ -7,6 +7,7 @@ Ought Gather 主入口
 import argparse
 import sys
 import os
+import copy
 import re
 import time
 import concurrent.futures
@@ -125,13 +126,15 @@ def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[F
                 continue
 
             # 先做内容处理，再判断是否有效；处理失败则保留原文再校验
+            orig_article = copy.deepcopy(article)
             try:
                 processor = ContentProcessor(result.source)
-                article = processor.process(article)
+                article = processor.process(copy.deepcopy(orig_article))
             except Exception as e:
                 logger.error(
-                    f"[{prefix}] 处理文章 '{article.title}' 失败: {e}，保留原始文章内容"
+                    f"[{prefix}] 处理文章 '{orig_article.title}' 失败: {e}，保留原始文章内容"
                 )
+                article = orig_article
 
             if not has_valid_content(article):
                 skipped_empty += 1

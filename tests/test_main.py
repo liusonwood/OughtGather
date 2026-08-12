@@ -270,6 +270,34 @@ class TestProcessResultsValidContent:
         tracker.mark_as_fetched.assert_called_once()
 
     @patch("src.main.ContentProcessor")
+    def test_processor_exception_with_mutation_keeps_clean_raw(self, mock_cp_cls):
+        """测试当ContentProcessor在处理中修改了article对象，但最终抛出异常，依然能恢复未受污染的原文章。"""
+        source = self._source()
+        valid_raw = self._article(
+            "被修改文章",
+            "原始 HTML 正文足够长，即便 ContentProcessor 抛错也应被保留。",
+        )
+        result = FetchResult(source=source, articles=[valid_raw], success=True)
+
+        def mutating_process(art):
+            art.content = "被污染的内容"
+            raise RuntimeError("mutating boom")
+
+        mock_processor = MagicMock()
+        mock_processor.process.side_effect = mutating_process
+        mock_cp_cls.return_value = mock_processor
+
+        tracker = MagicMock()
+        tracker.is_fetched.return_value = False
+
+        out = process_results([result], tracker)
+
+        assert len(out[0].articles) == 1
+        # 原文章内容没有被修改为"被污染的内容"
+        assert "原始 HTML" in out[0].articles[0].content
+        tracker.mark_as_fetched.assert_called_once()
+
+    @patch("src.main.ContentProcessor")
     def test_processor_exception_empty_raw_not_marked(self, mock_cp_cls):
         source = self._source()
         empty_raw = self._article("处理失败且空", "")
