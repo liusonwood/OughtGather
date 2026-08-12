@@ -292,7 +292,7 @@ class EPUBGenerator:
         download_results = {}  # image_src -> (filename, img_data) or None
         if unique_images:
             self.logger.info(f"Downloading {len(unique_images)} images concurrently...")
-            max_workers = min(len(unique_images), 10)
+            max_workers = min(len(unique_images), 25)
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_src = {
                     executor.submit(self.image_processor.download_and_process, src, referer): src

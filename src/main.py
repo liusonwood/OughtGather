@@ -242,7 +242,7 @@ def main(argv=None):
                     records = stop_task_buffer()
                     return res, records
 
-            max_workers = min(len(config.body), 10) if config.body else 1
+            max_workers = min(len(config.body), 20) if config.body else 1
             fresh_results = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_source = {
@@ -325,7 +325,7 @@ def main(argv=None):
                 records = stop_task_buffer()
                 return res, records
 
-        max_workers = min(len(config.body), 10) if config.body else 1
+        max_workers = min(len(config.body), 20) if config.body else 1
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_source = {
                 executor.submit(fetch_source_task, source): source

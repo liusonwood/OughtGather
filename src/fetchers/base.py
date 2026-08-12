@@ -106,7 +106,7 @@ class BaseFetcher(ABC):
         return source.src
 
 
-    def __init__(self, source: ContentSource, global_limit: int = 15, max_retries: int = 3):
+    def __init__(self, source: ContentSource, global_limit: int = 15, max_retries: int = 2):
         """
         初始化抓取器
 
@@ -203,9 +203,9 @@ class BaseFetcher(ABC):
 
             # 如果不是最后一次尝试，等待后重试
             if attempt < self.max_retries - 1:
-                # 自定义重试间隔：第1次失败后1s，第2次失败后10s
-                retry_intervals = [1, 10]
-                wait_time = retry_intervals[attempt] if attempt < len(retry_intervals) else 10
+                # 自定义重试间隔：第1次失败后0.5s，第2次失败后1.5s
+                retry_intervals = [0.5, 1.5]
+                wait_time = retry_intervals[attempt] if attempt < len(retry_intervals) else 1.5
                 self.logger.info(f"Waiting {wait_time}s before retry...")
                 time.sleep(wait_time)
 
@@ -221,7 +221,7 @@ class BaseFetcher(ABC):
             error=f"Failed after {self.max_retries} attempts: {last_error}"
         )
 
-    DEFAULT_TIMEOUT = 30
+    DEFAULT_TIMEOUT = 10
 
     def _make_request(
         self,

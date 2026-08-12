@@ -70,19 +70,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: 'requirements.txt'
 
-      - name: Install system dependencies
-        run: |
-          # Configure apt-get with retries and 30s timeouts to prevent hanging on slow mirrors
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout="40" update
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout="40" install -y --no-install-recommends fonts-wqy-zenhei
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "requirements.txt"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: uv pip install --system -r requirements.txt
 
       - name: Prepare config.json
         env:
@@ -151,8 +147,8 @@ jobs:
           retention-days: 7
 
       - name: Upload dedup records
-        # 上传去重数据文件（data/fetched_urls.txt），便于排查去重命中情况、手动比对历史
-        if: always()
+        # 上传去重数据文件（data/fetched_urls.txt），仅在失败或手动触发时执行，便于排查
+        if: failure() || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: dedup-records
@@ -161,8 +157,8 @@ jobs:
           retention-days: 7
 
       - name: Upload logs
-        # 无论成功或失败都上传运行日志（含去重检查 / 标记 / 保存等条目），便于下载排查
-        if: always()
+        # 仅在失败或手动触发时上传运行日志，节省正常定时运行的 Artifact 开销与时间
+        if: failure() || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: logs

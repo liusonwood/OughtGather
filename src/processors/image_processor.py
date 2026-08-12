@@ -118,7 +118,7 @@ class ImageProcessor:
             if referer:
                 headers["Referer"] = referer
 
-            with httpx.Client(timeout=30, follow_redirects=True) as client:
+            with httpx.Client(timeout=8, follow_redirects=True) as client:
                 response = client.get(url, headers=headers)
                 response.raise_for_status()
                 return response.content
