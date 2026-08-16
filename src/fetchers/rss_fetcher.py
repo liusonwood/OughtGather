@@ -38,9 +38,17 @@ class RSSFetcher(BaseFetcher):
     def get_default_source_title(cls, source: Any, articles: List[Article], source_title: Optional[str] = None) -> str:
         return source_title or source.src
 
+    def _parse_feed((self) -> feedparser.FeedParserDict:
+        """
+        使用基类带有伪装 User-Agent 的 _make_request 请求 RSS 数据，
+        避免直接传递 URL 给 feedparser 时因反爬防护返回 HTML 导致解析失败。
+        """
+        response = self._make_request(self.source.src)
+        return feedparser.parse(response.content)
+
     def fetch(self) -> FetchResult:
         """
-        执行 RSS 抓取
+        执行 RSS 抓取（单阶段入口）
 
         Returns:
             FetchResult: 抓取结果
@@ -48,8 +56,8 @@ class RSSFetcher(BaseFetcher):
         result = FetchResult(source=self.source, articles=[])
 
         try:
-            # 解析 RSS/Atom feed
-            feed = feedparser.parse(self.source.src)
+            # 使用 _parse_feed 请求并解析 RSS/Atom feed
+            feed = self._parse_feed()
 
             # 检查解析结果
             # 改进：即使有格式错误，只要有条目就继续处理
@@ -114,7 +122,8 @@ class RSSFetcher(BaseFetcher):
             解析失败时返回 None 以触发回退逻辑。
         """
         try:
-            feed = feedparser.parse(self.source.src)
+            # 改用 _parse_feed 发起带有请求头的网络请求
+            feed = self._parse_feed()
 
             if feed.bozo:
                 self.logger.warning(
