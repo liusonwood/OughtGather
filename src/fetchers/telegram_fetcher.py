@@ -110,7 +110,7 @@ class TelegramFetcher(BaseFetcher):
 
                 try:
                     self.logger.info(f"Fetching Telegram channel via node {host}: {rss_url}")
-                    response = self._make_request(rss_url)
+                    response = self._make_request(rss_url, browser=True)
                     parsed_feed = feedparser.parse(response.text)
 
                     # 检查解析错误

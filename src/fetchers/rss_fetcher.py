@@ -266,5 +266,5 @@ class RSSFetcher(BaseFetcher):
         不直接把 URL 交给 feedparser，避免其内部 urllib 绕过统一的
         User-Agent、连接复用和反爬策略。
         """
-        response = self._make_request(self.source.src)
+        response = self._make_request(self.source.src, browser=True)
         return feedparser.parse(response.content)

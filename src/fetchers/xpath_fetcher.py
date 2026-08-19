@@ -48,7 +48,7 @@ class XPathListAutoFetcher(BaseFetcher):
             self.logger.info(f"开始访问列表页: {list_url}")
             
             # 1. 访问并解析列表页面
-            response = self._make_request(list_url)
+            response = self._make_request(list_url, browser=True)
             from src.utils.helpers import HTML_PARSING_LOCK
             with HTML_PARSING_LOCK:
                 tree = lxml_html.fromstring(response.content)
@@ -197,7 +197,7 @@ class XPathListAutoFetcher(BaseFetcher):
             list_url = self.source.src
             self.logger.info(f"[阶段一] 访问列表页: {list_url}")
 
-            response = self._make_request(list_url)
+            response = self._make_request(list_url, browser=True)
             from src.utils.helpers import HTML_PARSING_LOCK
             with HTML_PARSING_LOCK:
                 tree = lxml_html.fromstring(response.content)
