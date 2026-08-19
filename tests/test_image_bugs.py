@@ -245,7 +245,7 @@ class TestImageBugs:
 
         with patch.object(fetcher, "_make_request") as mock_req:
             mock_req.return_value.text = raw_html
-            with patch("src.fetchers.rss_fetcher.trafilatura.extract", return_value=trafilatura_content):
+            with patch("src.fetchers.base.trafilatura.extract", return_value=trafilatura_content):
                 content, raw = fetcher._fetch_full_text("https://example.com/article")
 
                 # Content should have <img> tags, not <graphic>

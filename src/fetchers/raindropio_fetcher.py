@@ -1,11 +1,8 @@
 import os
 from typing import List, Optional
-from bs4 import BeautifulSoup
-import httpx
 
 from src.config import ContentSource
 from src.fetchers.base import BaseFetcher, FetchResult, Article
-from src.utils.logger import get_logger
 
 class RaindropFetcher(BaseFetcher):
     """Raindrop.io Fetcher"""

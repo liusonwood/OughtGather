@@ -105,6 +105,57 @@ class TestBaseFetcherShouldDelete:
 
 
 # =========================================================================
+# BaseFetcher._make_request 测试
+# =========================================================================
+
+class TestBaseFetcherMakeRequest:
+    """BaseFetcher._make_request 统一 HTTP 入口测试"""
+
+    def _make_fetcher(self):
+        class DummyFetcher(BaseFetcher):
+            def fetch(self):
+                return FetchResult(source=self.source, articles=[])
+
+        return DummyFetcher(ContentSource(type="web", src="https://example.com"))
+
+    def test_make_request_passes_json_and_method(self):
+        fetcher = self._make_fetcher()
+        mock_response = MagicMock()
+        mock_client = MagicMock()
+        mock_client.is_closed = False
+        mock_client.request.return_value = mock_response
+        fetcher._client = mock_client
+
+        fetcher._make_request(
+            "https://api.example.com",
+            method="POST",
+            json={"q": "hi"},
+            timeout=12,
+        )
+
+        mock_client.request.assert_called_once()
+        args, kwargs = mock_client.request.call_args
+        assert args[0] == "POST"
+        assert args[1] == "https://api.example.com"
+        assert kwargs["json"] == {"q": "hi"}
+        assert kwargs["timeout"] == 12
+        mock_response.read.assert_called_once()
+        mock_response.raise_for_status.assert_called_once()
+
+    def test_make_request_can_skip_raise_for_status(self):
+        fetcher = self._make_fetcher()
+        mock_response = MagicMock()
+        mock_client = MagicMock()
+        mock_client.is_closed = False
+        mock_client.request.return_value = mock_response
+        fetcher._client = mock_client
+
+        fetcher._make_request("https://example.com", raise_for_status=False)
+
+        mock_response.raise_for_status.assert_not_called()
+
+
+# =========================================================================
 # RSSFetcher 测试
 # =========================================================================
 
@@ -121,6 +172,37 @@ def _make_feedparser_dict(d):
 
 class TestRSSFetcher:
     """RSSFetcher 测试（mock feedparser）"""
+
+    @pytest.fixture(autouse=True)
+    def mock_rss_http(self):
+        """RSS 通过 BaseFetcher._make_request 下载 feed，测试中拦截真实 HTTP。"""
+        with patch.object(RSSFetcher, "_make_request") as mock_req:
+            mock_req.return_value = MagicMock(content=b"<rss></rss>", text="<rss></rss>")
+            yield mock_req
+
+    def test_fetch_uses_base_http(self, mock_rss_http, rss_source):
+        """RSS 抓取必须走基类 HTTP，而不是 feedparser 内置 urllib。"""
+        with patch("src.fetchers.rss_fetcher.feedparser.parse") as mock_parse:
+            mock_feed = MagicMock()
+            mock_feed.bozo = False
+            mock_feed.feed = {"title": "Test Feed"}
+            mock_feed.entries = [
+                _make_feedparser_dict({
+                    "title": "Entry 1",
+                    "link": "https://example.com/1",
+                    "content": [_make_feedparser_dict({"value": "<p>Content 1</p>"})],
+                    "tags": [],
+                }),
+            ]
+            mock_parse.return_value = mock_feed
+
+            fetcher = RSSFetcher(rss_source)
+            result = fetcher.fetch()
+
+            assert result.success is True
+            mock_rss_http.assert_called()
+            assert mock_rss_http.call_args[0][0] == rss_source.src
+            mock_parse.assert_called_once_with(mock_rss_http.return_value.content)
 
     @patch("src.fetchers.rss_fetcher.feedparser.parse")
     def test_parse_entries(self, mock_parse, rss_source):
@@ -312,8 +394,8 @@ class TestTrendingFetcher:
     """TrendingFetcher 测试"""
 
     @patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"})
-    @patch("src.fetchers.trending_fetcher.httpx.Client")
-    def test_trending_title_extraction_plain_text(self, mock_client_cls):
+    @patch.object(TrendingFetcher, "_make_request")
+    def test_trending_title_extraction_plain_text(self, mock_make_request):
         """测试 TrendingFetcher 能够将纯文本首行作为标题提取"""
         source = ContentSource(type="trending", src="AI trends", goal="Analyze AI")
         
@@ -326,10 +408,7 @@ class TestTrendingFetcher:
                 }
             }]
         }
-        mock_client = MagicMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__enter__.return_value = mock_client
-        mock_client_cls.return_value = mock_client
+        mock_make_request.return_value = mock_response
 
         fetcher = TrendingFetcher(source)
         result = fetcher.fetch()
@@ -340,8 +419,8 @@ class TestTrendingFetcher:
         assert "人工智能最新发展趋势报告" not in result.articles[0].content
 
     @patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"})
-    @patch("src.fetchers.trending_fetcher.httpx.Client")
-    def test_trending_title_extraction_markdown_and_bold(self, mock_client_cls):
+    @patch.object(TrendingFetcher, "_make_request")
+    def test_trending_title_extraction_markdown_and_bold(self, mock_make_request):
         """测试 TrendingFetcher 能够处理 Markdown 标题和加粗首行"""
         source = ContentSource(type="trending", src="AI trends", goal="Analyze AI")
         
@@ -354,10 +433,7 @@ class TestTrendingFetcher:
                 }
             }]
         }
-        mock_client = MagicMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__enter__.return_value = mock_client
-        mock_client_cls.return_value = mock_client
+        mock_make_request.return_value = mock_response
 
         fetcher = TrendingFetcher(source)
         result = fetcher.fetch()
@@ -620,13 +696,9 @@ class TestTrendingFetcher:
     """TrendingFetcher 测试（mock httpx + API key）"""
 
     @patch.dict("os.environ", {"OPENROUTER_API_KEY": "test_key_456", "TAVILY_API_KEY": "tavily_key_123"})
-    @patch("httpx.Client")
-    def test_fetch_analysis(self, mock_client_cls, trending_source):
+    @patch.object(TrendingFetcher, "_make_request")
+    def test_fetch_analysis(self, mock_make_request, trending_source):
         """测试 LLM 分析请求（带搜索）"""
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        
         # 定义按顺序的响应：第一个是 Tavily 搜索，第二个是 OpenRouter LLM
         mock_search_response = MagicMock()
         mock_search_response.status_code = 200
@@ -646,9 +718,7 @@ class TestTrendingFetcher:
             ]
         }
         
-        # 按调用顺序配置 side_effect
-        mock_client.post.side_effect = [mock_search_response, mock_llm_response]
-        mock_client_cls.return_value = mock_client
+        mock_make_request.side_effect = [mock_search_response, mock_llm_response]
 
         fetcher = TrendingFetcher(trending_source)
         result = fetcher.fetch()
@@ -656,7 +726,7 @@ class TestTrendingFetcher:
         assert result.success is True
         
         # 验证发送给 LLM 的 payload 包含搜索结果
-        llm_call = mock_client.post.call_args_list[1]
+        llm_call = mock_make_request.call_args_list[1]
         payload = llm_call.kwargs["json"]
         user_message = payload["messages"][1]["content"]
         assert "Search content 1" in user_message
@@ -695,14 +765,10 @@ class TestTrendingFetcher:
             assert result.articles[0].author == "test-model"
 
     @patch.dict("os.environ", {"OPENROUTER_API_KEY": "test_key_456"})
-    @patch("httpx.Client")
-    def test_trending_fetcher_title_extraction(self, mock_client_cls):
+    @patch.object(TrendingFetcher, "_make_request")
+    def test_trending_fetcher_title_extraction(self, mock_make_request):
         """测试 TrendingFetcher 自动从首行 # 或 ## 提取标题并从正文中去除"""
         # Case 1: # 开头
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
@@ -714,8 +780,7 @@ class TestTrendingFetcher:
                 }
             ]
         }
-        mock_client.post.return_value = mock_response
-        mock_client_cls.return_value = mock_client
+        mock_make_request.return_value = mock_response
 
         source = ContentSource(type="trending", src="AI 趋势", goal="分析 AI")
         fetcher = TrendingFetcher(source)
@@ -891,6 +956,13 @@ class TestFetcherPlugins:
         assert get_fetcher_class("web") is WebFetcher
         assert get_fetcher_class("trending") is TrendingFetcher
         assert get_fetcher_class("nonexistent") is None
+
+    def test_all_registered_fetchers_inherit_base(self):
+        """所有已注册 fetcher 都必须继承 BaseFetcher。"""
+        from src.fetchers.base import _registry
+        assert _registry, "fetcher registry should not be empty"
+        for type_name, cls in _registry.items():
+            assert issubclass(cls, BaseFetcher), f"{type_name} ({cls}) does not inherit BaseFetcher"
 
     def test_custom_fetcher_auto_registration(self):
         """测试自定义抓取器是否能通过 subclass 自动注册"""

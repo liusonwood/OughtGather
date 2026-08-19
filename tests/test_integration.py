@@ -84,7 +84,8 @@ class TestFullPipeline:
             }),
         ]
 
-        with patch("src.fetchers.rss_fetcher.feedparser.parse", return_value=mock_feed):
+        with patch.object(RSSFetcher, "_make_request", return_value=MagicMock(content=b"<rss></rss>", text="<rss></rss>")), \
+             patch("src.fetchers.rss_fetcher.feedparser.parse", return_value=mock_feed):
             # 3. 抓取 RSS
             source = config.body[0]
             fetcher = RSSFetcher(source)
@@ -159,7 +160,14 @@ class TestFullPipeline:
         config = _parse_config(config_data)
 
         # 2. Mock 两个 RSS 源
-        def mock_parse_factory(url):
+        def mock_make_request(url, **kwargs):
+            resp = MagicMock()
+            resp.content = url.encode("utf-8")
+            resp.text = url
+            return resp
+
+        def mock_parse_factory(content):
+            url = content.decode("utf-8") if isinstance(content, bytes) else str(content)
             mock_feed = MagicMock()
             mock_feed.bozo = False
 
@@ -191,7 +199,8 @@ class TestFullPipeline:
 
         all_results = []
 
-        with patch("src.fetchers.rss_fetcher.feedparser.parse", side_effect=mock_parse_factory):
+        with patch.object(RSSFetcher, "_make_request", side_effect=mock_make_request), \
+             patch("src.fetchers.rss_fetcher.feedparser.parse", side_effect=mock_parse_factory):
             # 3. 抓取所有源
             for source in config.body:
                 fetcher = RSSFetcher(source)

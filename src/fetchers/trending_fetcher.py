@@ -172,32 +172,31 @@ class TrendingFetcher(BaseFetcher):
 
     def _search_web(self, query: str) -> list:
         """调用 Tavily API 获取实时信息"""
-        import httpx
         try:
             # 安全读取通过 config_schema 注册并配置的 metadata 参数
             metadata = getattr(self.source, "metadata", {}) or {}
             search_topic = metadata.get("search_topic", "news")
             search_time_range = metadata.get("search_time_range", "day")
 
-            with httpx.Client(timeout=10) as client:
-                headers = {
-                    "Authorization": f"Bearer {self.tavily_api_key}",
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "query": query,
-                    "max_results": 3,
-                    "search_depth": "advanced",
-                    "topic": search_topic,
-                    "time_range": search_time_range
-                }
-                resp = client.post(
-                    "https://api.tavily.com/search",
-                    headers=headers,
-                    json=payload
-                )
-                resp.raise_for_status()
-                return resp.json().get("results", [])
+            headers = {
+                "Authorization": f"Bearer {self.tavily_api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "query": query,
+                "max_results": 3,
+                "search_depth": "advanced",
+                "topic": search_topic,
+                "time_range": search_time_range
+            }
+            resp = self._make_request(
+                "https://api.tavily.com/search",
+                method="POST",
+                headers=headers,
+                json=payload,
+                timeout=10,
+            )
+            return resp.json().get("results", [])
         except Exception as e:
             self.logger.error(f"Search failed: {e}")
             return []
@@ -289,21 +288,21 @@ class TrendingFetcher(BaseFetcher):
         }
 
         try:
-            # 使用 httpx 发送 POST 请求
-            import httpx
-            with httpx.Client(timeout=60) as client:
-                resp = client.post(
-                    self.config['endpoint'],
-                    headers=headers,
-                    json=payload
-                )
-                
-                # 如果状态码不对，在抛出异常前把 OpenRouter 的原生错误明细打印到日志里
-                if resp.status_code >= 400:
-                    self.logger.error(f"OpenRouter error: {resp.text}")
-                
+            resp = self._make_request(
+                self.config['endpoint'],
+                method="POST",
+                headers=headers,
+                json=payload,
+                timeout=60,
+                raise_for_status=False,
+            )
+
+            # 如果状态码不对，在抛出异常前把 OpenRouter 的原生错误明细打印到日志里
+            if resp.status_code >= 400:
+                self.logger.error(f"OpenRouter error: {resp.text}")
                 resp.raise_for_status()
-                data = resp.json()
+
+            data = resp.json()
 
             # 提取响应内容
             content = data.get("choices", [{}])[0].get("message", {}).get("content")

@@ -5,11 +5,9 @@ RSS 抓取器模块
 
 from typing import List, Optional, Any
 import feedparser
-import trafilatura
 
 from src.config import ContentSource
 from src.fetchers.base import BaseFetcher, FetchResult, Article
-from src.utils.logger import get_logger
 from src.utils.helpers import format_date
 
 
@@ -48,8 +46,8 @@ class RSSFetcher(BaseFetcher):
         result = FetchResult(source=self.source, articles=[])
 
         try:
-            # 解析 RSS/Atom feed
-            feed = feedparser.parse(self.source.src)
+            # 通过 BaseFetcher._make_request 下载后再解析，复用统一 UA / 连接池
+            feed = self._parse_feed()
 
             # 检查解析结果
             # 改进：即使有格式错误，只要有条目就继续处理
@@ -114,7 +112,7 @@ class RSSFetcher(BaseFetcher):
             解析失败时返回 None 以触发回退逻辑。
         """
         try:
-            feed = feedparser.parse(self.source.src)
+            feed = self._parse_feed()
 
             if feed.bozo:
                 self.logger.warning(
@@ -261,49 +259,14 @@ class RSSFetcher(BaseFetcher):
 
         return ""
 
-    def _fetch_full_text(self, url: str) -> tuple:
+    def _parse_feed(self):
         """
-        抓取完整正文
+        通过基类 HTTP 客户端下载 RSS/Atom，再用 feedparser 解析。
 
-        Args:
-            url: 文章 URL
-
-        Returns:
-            tuple: (正文 HTML, 原始页面 HTML)。trafilatura 失败时正文为空字符串。
+        不直接把 URL 交给 feedparser，避免其内部 urllib 绕过统一的
+        User-Agent、连接复用和反爬策略。
         """
-        if not url:
-            return "", ""
-
-        try:
-            # 下载网页
-            response = self._make_request(url)
-            raw_html = response.text
-
-            # 使用 trafilatura 提取正文
-            from src.utils.helpers import HTML_PARSING_LOCK
-            with HTML_PARSING_LOCK:
-                content = trafilatura.extract(
-                    raw_html,
-                    include_comments=False,
-                    include_tables=True,
-                    include_images=True,
-                    include_links=True,
-                    include_formatting=True,
-                    output_format="html"
-                )
-
-            if content:
-                # trafilatura 在 output_format="html" 时会将 <img> 转换为
-                # <graphic>（HTML5 元素），导致下游的 ContentProcessor 和
-                # EPUBGenerator 找不到 <img> 标签而丢失所有图片。
-                # 这里将 <graphic src="..."> 转换回 <img src="...">。
-                content = self._restore_img_tags(content)
-
-            if not content:
-                self.logger.warning(f"trafilatura failed to extract content from {url}")
-
-            return content or "", raw_html
-
-        except Exception as e:
-            self.logger.error(f"Failed to fetch full text from {url}: {e}")
-            return "", ""
+        response = self._make_request(
+            self.source.src, browser=True, reject_html=True
+        )
+        return feedparser.parse(response.content)
