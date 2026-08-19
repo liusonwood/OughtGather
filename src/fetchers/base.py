@@ -236,16 +236,25 @@ class BaseFetcher(ABC):
         url: str,
         method: str = "GET",
         headers: Optional[Dict[str, str]] = None,
-        timeout: int = DEFAULT_TIMEOUT
+        timeout: int = DEFAULT_TIMEOUT,
+        json: Optional[Any] = None,
+        data: Optional[Any] = None,
+        params: Optional[Dict[str, Any]] = None,
+        raise_for_status: bool = True,
     ) -> httpx.Response:
         """
-        发送 HTTP 请求
+        发送 HTTP 请求。所有 fetcher 的网络访问都应走此方法，以便统一
+        User-Agent、连接复用与后续反爬策略。
 
         Args:
             url: 请求 URL
             method: HTTP 方法
             headers: 请求头
             timeout: 超时时间（秒）
+            json: JSON 请求体（用于 POST/PUT 等）
+            data: 表单或原始请求体
+            params: URL 查询参数
+            raise_for_status: 是否在 4xx/5xx 时抛出异常
 
         Returns:
             httpx.Response: 响应对象
@@ -261,9 +270,18 @@ class BaseFetcher(ABC):
             limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
             self._client = httpx.Client(timeout=timeout, follow_redirects=True, limits=limits)
 
-        response = self._client.request(method, url, headers=default_headers, timeout=timeout)
-        response.raise_for_status()
+        response = self._client.request(
+            method,
+            url,
+            headers=default_headers,
+            timeout=timeout,
+            json=json,
+            data=data,
+            params=params,
+        )
         response.read()  # 确保读取响应体
+        if raise_for_status:
+            response.raise_for_status()
         return response
 
 
