@@ -3,6 +3,7 @@
 定义统一的抓取接口和基础功能
 """
 
+import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -610,15 +611,21 @@ class BaseFetcher(ABC):
 
         trafilatura 在 output_format="html" 模式下会把 <img> 转换为
         <graphic>（EPUB/HTML5 标准元素），但下游的图片处理流程只识别 <img>。
+
+        使用正则替换，避免 lxml 在解析时按 HTML 规则把 <p> 内的 <pre>
+        自动拆段（<p>text <pre>code</pre> more</p> → </p><pre>），
+        否则后续把单行 <pre> 转回 <code> 后会留下 </p><code>。
         """
-        from bs4 import BeautifulSoup
-        from src.utils.helpers import HTML_PARSING_LOCK
-        with HTML_PARSING_LOCK:
-            soup = BeautifulSoup(html, 'lxml')
-        for graphic in soup.find_all('graphic'):
-            graphic.name = 'img'
-        body = soup.body if soup.body else soup
-        return body.decode_contents()
+        if not html:
+            return html
+
+        html = re.sub(r'<\s*graphic\b', '<img', html, flags=re.IGNORECASE)
+        html = re.sub(r'</\s*graphic\s*>', '', html, flags=re.IGNORECASE)
+
+        # trafilatura 会包一层 html/body；保持与原先 BeautifulSoup.decode_contents() 一致
+        html = re.sub(r'(?is)^\s*<html[^>]*>\s*<body[^>]*>\s*', '', html, count=1)
+        html = re.sub(r'(?is)\s*</body>\s*</html>\s*$', '', html, count=1)
+        return html
 
     def _fetch_full_text(self, url: str) -> tuple:
         """

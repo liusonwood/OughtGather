@@ -998,6 +998,47 @@ class TestNestedPreInParagraphOrInline:
         result = processor.process(article)
         assert '<p>建议先执行一次<code>pkg update &amp;&amp; pkg upgrade -y</code>命令</p>' in result.content
 
+    def test_sspai_inline_pre_stays_in_paragraph_with_lead_image(self):
+        """少数派等站点：trafilatura 把行内 code 写成 pre，且文章带首图时不得拆成 </p><code>"""
+        source = ContentSource(type="web", src="https://sspai.com/post/113225")
+        processor = ContentProcessor(source)
+        html = (
+            '<p><a href="https://sspai.com/post/86175">一种常见做法</a>'
+            '是用 <pre>codesign</pre> 给微信重新签名，再授权它访问外置硬盘。</p>'
+            '<p>对微信来说它仍在访问自己的 <pre>xwechat_files</pre>，但对 macOS 来说路径没变。</p>'
+        )
+        article = Article(
+            title="Test",
+            content=html,
+            url="https://sspai.com/post/113225",
+            images=["https://example.com/lead.jpg"],
+        )
+        result = processor.process(article)
+        assert '</p><code>' not in result.content
+        assert (
+            '<p><a href="https://sspai.com/post/86175">一种常见做法</a>'
+            '是用 <code>codesign</code> 给微信重新签名，再授权它访问外置硬盘。</p>'
+        ) in result.content
+        assert '<p>对微信来说它仍在访问自己的 <code>xwechat_files</code>，但对 macOS 来说路径没变。</p>' in result.content
+
+    def test_already_split_p_pre_rejoins_inline_code(self):
+        """lxml 已把 <p> 内 <pre> 拆段时，应把行内 code 与后续文本合并回段落"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = (
+            '<p><a href="https://sspai.com/post/86175">一种常见做法</a>是用 </p>'
+            '<pre>codesign</pre> 给微信重新签名，再授权它访问外置硬盘。'
+            '<p>下一句</p>'
+        )
+        article = _make_article(html)
+        result = processor.process(article)
+        assert '</p><code>' not in result.content
+        assert (
+            '<p><a href="https://sspai.com/post/86175">一种常见做法</a>'
+            '是用 <code>codesign</code> 给微信重新签名，再授权它访问外置硬盘。</p>'
+        ) in result.content
+        assert '<p>下一句</p>' in result.content
+
     def test_exclude_applied_after_clean_html_and_keep_link(self):
         """测试 exclude 规则在 HTML 清洗和 keep_link 规则之后应用"""
         source = ContentSource(

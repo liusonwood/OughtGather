@@ -185,6 +185,22 @@ class TestImageBugs:
         assert imgs[0]['src'] == 'https://example.com/normal.jpg'
         assert imgs[1]['src'] == 'https://example.com/converted.jpg'
 
+    def test_restore_img_tags_does_not_split_pre_inside_p(self):
+        """_restore_img_tags 不得用 lxml 把 <p> 内的 <pre> 拆出段落"""
+        from src.fetchers.base import BaseFetcher
+
+        html = (
+            '<html><body>'
+            '<p>是用 <pre>codesign</pre> 给微信重新签名</p>'
+            '<graphic src="https://example.com/a.jpg"></graphic>'
+            '</body></html>'
+        )
+        result = BaseFetcher._restore_img_tags(html)
+        assert '<p>是用 <pre>codesign</pre> 给微信重新签名</p>' in result
+        assert '</p><pre>' not in result
+        assert '<img src="https://example.com/a.jpg">' in result or '<img src="https://example.com/a.jpg"/>' in result
+        assert '<graphic' not in result.lower()
+
     def test_web_fetcher_restores_graphic_tags(self):
         """Test that WebFetcher restores <graphic> tags from trafilatura output."""
         source = ContentSource(type="web", src="https://example.com", title="Test")

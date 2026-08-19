@@ -40,11 +40,17 @@ class ContentProcessor:
         Returns:
             Article: 处理后的文章
         """
+        # 1. 先清洗 HTML（把段落内的单行 <pre> 转成行内 <code>）。
+        # 必须在任何 lxml/BeautifulSoup 解析之前完成：HTML 不允许 <p> 内嵌 <pre>，
+        # 解析器会把 <p>text <pre>code</pre> more</p> 拆成 </p><pre>，再转回
+        # <code> 就会留下 </p><code>。
+        article.content = self._clean_html(article.content, base_url=article.url)
+
         # 0. 如果提取的图片列表中有首图（通常是封面图），且正文中没有包含该图片，
         # 则在正文最前方插入它，以便能够在电子书中下载并展示。
-        if article.images and article.content:
+        if article.images:
             lead_image = article.images[0]
-            soup = BeautifulSoup(article.content, 'lxml')
+            soup = BeautifulSoup(article.content or '', 'lxml')
             has_lead_image = False
             for img in soup.find_all('img'):
                 src = img.get('src') or img.get('data-src')
@@ -64,9 +70,6 @@ class ContentProcessor:
                         soup.append(body)
                 soup.body.insert(0, wrapper)
                 article.content = soup.body.decode_contents()
-
-        # 1. 清洗 HTML
-        article.content = self._clean_html(article.content, base_url=article.url)
 
         # 2. 应用 keep_link 规则
         if self.source.keep_link == "N":
@@ -781,6 +784,9 @@ class ContentProcessor:
         # 4. 修复嵌套结构：块级元素不能在 <p> 内
         self._fix_nested_blocks(soup)
 
+        # 4.5. 把被解析器拆出段落的行内 <code> 等重新合并回前一个 <p>/<h*>
+        self._rejoin_split_phrasing(soup)
+
         # === 原有安全规则 ===
 
         # 移除 script 和 style 标签
@@ -901,6 +907,79 @@ class ContentProcessor:
             # 如果没有修复任何问题，提前退出
             if fixed_count == 0:
                 break
+
+    def _rejoin_split_phrasing(self, soup: BeautifulSoup) -> None:
+        """
+        将因 <p> 内嵌 <pre> 而被 HTML 解析器拆出的行内内容合并回前一段落。
+
+        输入常见形态（trafilatura 把 <code> 写成 <pre>，再被 lxml 拆段）：
+          <p>是用 </p><code>codesign</code> 给微信重新签名
+        处理后：
+          <p>是用 <code>codesign</code> 给微信重新签名</p>
+        """
+        from bs4 import NavigableString, Tag
+
+        inline_tags = {
+            'a', 'abbr', 'b', 'br', 'cite', 'code', 'del', 'em', 'i', 'img',
+            'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub',
+            'sup', 'u', 'var', 'time',
+        }
+
+        for tag in soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+            while True:
+                nxt = tag.next_sibling
+                if nxt is None:
+                    break
+                if isinstance(nxt, NavigableString):
+                    if str(nxt).strip():
+                        # 被拆出段落的正文必须合并回去
+                        tag.append(nxt)
+                        continue
+                    # nxt 是纯空白：向后跳过连续空白，找到首个非空白兄弟
+                    # 只有当后续是行内内容（行内标签或非空白文本）时才吸收该空白，
+                    # 避免把段落后的尾巴空格吞进 <p>
+                    probe = nxt.next_sibling
+                    while probe is not None and isinstance(probe, NavigableString) and not str(probe).strip():
+                        probe = probe.next_sibling
+                    if probe is None:
+                        break
+                    if isinstance(probe, Tag) and probe.name in inline_tags:
+                        tag.append(nxt)
+                        continue
+                    if isinstance(probe, NavigableString) and str(probe).strip():
+                        tag.append(nxt)
+                        continue
+                    break
+                if isinstance(nxt, Tag) and nxt.name in inline_tags:
+                    tag.append(nxt)
+                    continue
+                break
+
+        # 块级元素之后仍漂在 body 下的行内节点（如 <pre> 后的 " After"）包进 <p>
+        body = soup.body if soup.body else soup
+        run = []
+
+        def flush_run():
+            if not run:
+                return
+            if all(isinstance(n, NavigableString) and not str(n).strip() for n in run):
+                run.clear()
+                return
+            wrapper = soup.new_tag('p')
+            run[0].insert_before(wrapper)
+            for node in run:
+                wrapper.append(node)
+            run.clear()
+
+        for child in list(body.children):
+            is_inline = isinstance(child, NavigableString) or (
+                isinstance(child, Tag) and child.name in inline_tags
+            )
+            if is_inline:
+                run.append(child)
+            else:
+                flush_run()
+        flush_run()
 
     def _ensure_valid_html(self, html: str) -> str:
         """
