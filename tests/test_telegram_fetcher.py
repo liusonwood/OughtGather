@@ -259,5 +259,7 @@ class TestTelegramFetcher:
             assert result.success is True
             # 应该跳过了空节点，使用了 https://rsshub.app
             mock_make_request.assert_called_with(
-                "https://rsshub.app/telegram/channel/durov", browser=True
+                "https://rsshub.app/telegram/channel/durov",
+                browser=True,
+                reject_html=True,
             )

@@ -18,11 +18,19 @@ from src.utils.logger import get_logger
 class _CompatResponse:
     """cloudscraper（requests）响应的薄封装，接口与 fetcher 使用的 httpx.Response 对齐。"""
 
-    def __init__(self, content: bytes, status_code: int, text: str, url: str = ""):
+    def __init__(
+        self,
+        content: bytes,
+        status_code: int,
+        text: str,
+        url: str = "",
+        headers: Optional[Dict[str, str]] = None,
+    ):
         self.content = content
         self.status_code = status_code
         self.text = text
         self.url = url
+        self.headers = headers or {}
 
     def json(self):
         return json_lib.loads(self.content)
@@ -291,6 +299,7 @@ class BaseFetcher(ABC):
         params: Optional[Dict[str, Any]] = None,
         raise_for_status: bool = True,
         browser: bool = False,
+        reject_html: bool = False,
     ) -> httpx.Response:
         """
         发送 HTTP 请求。所有 fetcher 的网络访问都应走此方法，以便统一
@@ -305,8 +314,11 @@ class BaseFetcher(ABC):
             data: 表单或原始请求体
             params: URL 查询参数
             raise_for_status: 是否在 4xx/5xx 时抛出异常
-            browser: 为 True 时使用完整 Chrome 客户端提示头；GET 遇到 403
-                时再回退 cloudscraper。仅页面抓取应开启，JSON API 不要开。
+            browser: 为 True 时使用完整 Chrome 客户端提示头；GET 遇到
+                403/WAF 挑战（或 reject_html 时收到 HTML）再回退 cloudscraper。
+                仅页面抓取应开启，JSON API 不要开。
+            reject_html: RSS/Atom 等期望 XML 时设为 True。200 却拿到 HTML
+                错误页时同样走 cloudscraper，避免 feedparser 报 mismatched tag。
 
         Returns:
             httpx.Response 或与之接口兼容的响应（cloudscraper 回退路径）
@@ -330,19 +342,31 @@ class BaseFetcher(ABC):
         )
         response.read()  # 确保读取响应体
 
-        if (
-            browser
-            and method.upper() == "GET"
-            and response.status_code == 403
+        if browser and method.upper() == "GET" and self._should_try_cloudscraper(
+            response, reject_html=reject_html
         ):
+            reason = self._block_reason(response)
             self.logger.warning(
-                f"HTTP 403 for {url}, retrying with cloudscraper"
+                f"{reason} for {url}, retrying with cloudscraper"
             )
             fallback = self._cloudscraper_fallback(
                 url, headers=default_headers, timeout=timeout, params=params
             )
-            if fallback is not None and fallback.status_code < 400:
+            if (
+                fallback is not None
+                and fallback.status_code < 400
+                and not self._should_try_cloudscraper(fallback, reject_html=reject_html)
+            ):
                 return fallback
+            if fallback is not None:
+                response = fallback
+
+        if browser and self._is_waf_challenge(response):
+            raise RuntimeError(f"{self._block_reason(response)} for {url}")
+        if reject_html and self._looks_like_html(response):
+            raise RuntimeError(
+                f"Expected feed XML but received HTML (HTTP {response.status_code}) for {url}"
+            )
 
         if raise_for_status:
             response.raise_for_status()
@@ -381,10 +405,60 @@ class BaseFetcher(ABC):
                 status_code=resp.status_code,
                 text=resp.text,
                 url=str(resp.url),
+                headers=dict(resp.headers),
             )
         except Exception as e:
             self.logger.warning(f"cloudscraper fallback failed for {url}: {e}")
             return None
+
+    @staticmethod
+    def _header(response, name: str) -> str:
+        headers = getattr(response, "headers", None) or {}
+        try:
+            return headers.get(name) or headers.get(name.lower()) or ""
+        except Exception:
+            return ""
+
+    def _looks_like_html(self, response) -> bool:
+        content_type = self._header(response, "content-type").lower()
+        if "text/html" in content_type and "xml" not in content_type:
+            return True
+        content = getattr(response, "content", b"") or b""
+        head = content[:512].lstrip().lower()
+        return head.startswith(b"<!doctype html") or head.startswith(b"<html")
+
+    def _is_waf_challenge(self, response) -> bool:
+        status = getattr(response, "status_code", 0)
+        action = self._header(response, "x-amzn-waf-action").lower()
+        if status == 202 or action in ("challenge", "captcha"):
+            return True
+        content = (getattr(response, "content", b"") or b"")[:2048].lower()
+        return (
+            b"awswafintegration" in content
+            or b"aws-waf-token" in content
+            or b"cdn-cgi/challenge-platform" in content
+        )
+
+    def _should_try_cloudscraper(self, response, reject_html: bool = False) -> bool:
+        status = getattr(response, "status_code", 0)
+        if status in (403, 202) or self._is_waf_challenge(response):
+            return True
+        if reject_html and self._looks_like_html(response):
+            return True
+        return False
+
+    def _block_reason(self, response) -> str:
+        status = getattr(response, "status_code", 0)
+        action = self._header(response, "x-amzn-waf-action")
+        if action:
+            return f"WAF challenge (HTTP {status}, x-amzn-waf-action={action})"
+        if status == 202:
+            return f"WAF challenge (HTTP {status})"
+        if status == 403:
+            return f"HTTP {status}"
+        if self._looks_like_html(response):
+            return f"HTML challenge page (HTTP {status})"
+        return f"HTTP {status}"
 
 
     def _resolve_url(self, url: str, base_url: Optional[str] = None) -> str:
