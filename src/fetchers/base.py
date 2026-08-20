@@ -8,12 +8,14 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
+from urllib.parse import urlparse
 import json as json_lib
 import httpx
 import trafilatura
 
 from src.config import ContentSource
 from src.utils.logger import get_logger
+from src.utils.aws_waf import solve_aws_waf, WafTokenCache
 
 
 class _CompatResponse:
@@ -328,9 +330,15 @@ class BaseFetcher(ABC):
         if headers:
             default_headers.update(headers)
 
+        domain = urlparse(url).netloc
+        cached_token = WafTokenCache.get(domain)
+
         if not hasattr(self, '_client') or self._client is None or self._client.is_closed:
             limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
             self._client = httpx.Client(timeout=timeout, follow_redirects=True, limits=limits)
+
+        if cached_token:
+            self._client.cookies.set("aws-waf-token", cached_token, domain=domain)
 
         response = self._client.request(
             method,
@@ -343,6 +351,38 @@ class BaseFetcher(ABC):
         )
         response.read()  # 确保读取响应体
 
+        # 优先处理 AWS WAF 挑战（HTTP 202 或 x-amzn-waf-action 响应）
+        if browser and method.upper() == "GET" and self._is_waf_challenge(response):
+            reason = self._block_reason(response)
+            self.logger.warning(
+                f"{reason} for {url}, attempting AWS WAF challenge solver"
+            )
+            token = solve_aws_waf(
+                self._client,
+                url,
+                response.text,
+                user_agent=default_headers.get("User-Agent", ""),
+                timeout=timeout,
+            )
+            if token:
+                self._client.cookies.set("aws-waf-token", token, domain=domain)
+                retry_resp = self._client.request(
+                    method,
+                    url,
+                    headers=default_headers,
+                    timeout=timeout,
+                    json=json,
+                    data=data,
+                    params=params,
+                )
+                retry_resp.read()
+                if not self._is_waf_challenge(retry_resp):
+                    self.logger.info(
+                        f"AWS WAF challenge solved successfully for {url} ({retry_resp.status_code})"
+                    )
+                    response = retry_resp
+
+        # 若仍被阻断（例如 Cloudflare 403），尝试 cloudscraper 降级
         if browser and method.upper() == "GET" and self._should_try_cloudscraper(
             response, reject_html=reject_html
         ):
@@ -395,7 +435,7 @@ class BaseFetcher(ABC):
             resp = self._scraper.get(
                 url, headers=headers, timeout=timeout, params=params
             )
-            if resp.status_code < 400:
+            if resp.status_code < 400 and not self._is_waf_challenge(resp):
                 self.logger.info(f"cloudscraper recovered {url} ({resp.status_code})")
             else:
                 self.logger.warning(
