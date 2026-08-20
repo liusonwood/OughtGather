@@ -55,16 +55,18 @@ class ContentSource:
     priority: int = 0
     title: Optional[str] = None
     keep_link: str = "Y"
-    full_text: str = "N"
     exclude: Optional[List[Dict[str, str]]] = None
     delete: Optional[str] = None
-    goal: Optional[str] = None
-    model: Optional[str] = None
     load_images: str = "Y"  # 是否加载图片 (Y/N)
-    metadata: Optional[Dict[str, Any]] = None  # 额外的配置参数
+    metadata: Optional[Dict[str, Any]] = None  # Fetcher 专属配置参数
 
     def __post_init__(self):
         """验证配置"""
+        if self.metadata is None:
+            self.metadata = {}
+        elif not isinstance(self.metadata, dict):
+            raise ValueError("metadata must be an object")
+
         import src.fetchers
         from src.fetchers.base import _registry
 
@@ -89,11 +91,9 @@ class ContentSource:
             self.priority,
             self.title,
             self.keep_link,
-            self.full_text,
             self.delete,
-            self.goal,
-            self.model,
             self.load_images,
+            json.dumps(self.metadata, ensure_ascii=False, sort_keys=True, default=str),
         ))
 
 
@@ -177,19 +177,26 @@ def _parse_config(data: Dict[str, Any]) -> Config:
             except (ValueError, TypeError):
                 priority = 0
 
+            legacy_keys = {"full_text", "goal", "model"}
+            misplaced_keys = sorted(legacy_keys.intersection(source_data))
+            if misplaced_keys:
+                raise ValueError(
+                    f"Fetcher-specific options must be nested under metadata: "
+                    f"{', '.join(misplaced_keys)}"
+                )
+
+            metadata = source_data.get("metadata")
+
             source = ContentSource(
                 type=source_data.get("type"),
                 src=source_data.get("src"),
                 priority=priority,
                 title=source_data.get("title"),
                 keep_link=source_data.get("keep_link", "Y"),
-                full_text=source_data.get("full_text", "N"),
                 exclude=source_data.get("exclude"),
                 delete=source_data.get("delete"),
-                goal=source_data.get("goal"),
-                model=source_data.get("model"),
                 load_images=source_data.get("load_images", "Y"),
-                metadata=source_data.get("metadata")
+                metadata=metadata,
             )
             sources.append(source)
         except Exception as e:

@@ -471,7 +471,7 @@ class TestTrendingFetcher:
     @patch.object(TrendingFetcher, "_make_request")
     def test_trending_title_extraction_plain_text(self, mock_make_request):
         """测试 TrendingFetcher 能够将纯文本首行作为标题提取"""
-        source = ContentSource(type="trending", src="AI trends", goal="Analyze AI")
+        source = ContentSource(type="trending", src="AI trends", metadata={"goal": "Analyze AI"})
         
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -496,7 +496,7 @@ class TestTrendingFetcher:
     @patch.object(TrendingFetcher, "_make_request")
     def test_trending_title_extraction_markdown_and_bold(self, mock_make_request):
         """测试 TrendingFetcher 能够处理 Markdown 标题和加粗首行"""
-        source = ContentSource(type="trending", src="AI trends", goal="Analyze AI")
+        source = ContentSource(type="trending", src="AI trends", metadata={"goal": "Analyze AI"})
         
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -830,7 +830,7 @@ class TestTrendingFetcher:
         """测试 trending 默认标题"""
         source = ContentSource(
             type="trending", src="AI 趋势",
-            goal="分析 AI",
+            metadata={"goal": "分析 AI"},
         )
         with patch("src.fetchers.trending_fetcher.TrendingFetcher._call_llm_api", return_value=("<p>内容</p>", "test-model", None)):
             fetcher = TrendingFetcher(source)
@@ -856,7 +856,7 @@ class TestTrendingFetcher:
         }
         mock_make_request.return_value = mock_response
 
-        source = ContentSource(type="trending", src="AI 趋势", goal="分析 AI")
+        source = ContentSource(type="trending", src="AI 趋势", metadata={"goal": "分析 AI"})
         fetcher = TrendingFetcher(source)
         result = fetcher.fetch()
         
@@ -898,7 +898,7 @@ class TestTrendingFetcher:
         assert "This is the third content body." in result.articles[0].content
 
         # Case 4: 带自定义标题 (自定义标题仅作为大章节标题，不覆盖从 AI 回复中提取的文章标题)
-        source_with_title = ContentSource(type="trending", src="AI 趋势", goal="分析 AI", title="Custom Title Override")
+        source_with_title = ContentSource(type="trending", src="AI 趋势", metadata={"goal": "分析 AI"}, title="Custom Title Override")
         fetcher_with_title = TrendingFetcher(source_with_title)
         mock_response.json.return_value = {
             "choices": [
@@ -916,7 +916,7 @@ class TestTrendingFetcher:
         assert "Content details." in result.articles[0].content
 
         # Case 5: 带自定义标题但 AI 未能提取出文章标题
-        source_no_extracted = ContentSource(type="trending", src="AI 趋势", goal="分析 AI", title="Custom Section Title")
+        source_no_extracted = ContentSource(type="trending", src="AI 趋势", metadata={"goal": "分析 AI"}, title="Custom Section Title")
         fetcher_no_extracted = TrendingFetcher(source_no_extracted)
         with patch("src.fetchers.trending_fetcher.TrendingFetcher._call_llm_api", return_value=("<p>内容</p>", "test-model", None)):
             result = fetcher_no_extracted.fetch()
@@ -960,23 +960,23 @@ class TestTrendingFetcher:
         
         # 1. 测试 metadata.language 指定语言
         source_cn = ContentSource(
-            type="trending", src="AI 趋势", goal="分析 AI",
-            metadata={"language": "Chinese"}
+            type="trending", src="AI 趋势",
+            metadata={"goal": "分析 AI", "language": "Chinese"}
         )
         fetcher_cn = TrendingFetcher(source_cn)
         assert fetcher_cn._get_target_language() == "Chinese"
 
         source_en = ContentSource(
-            type="trending", src="AI 趋势", goal="分析 AI",
-            metadata={"language": "English"}
+            type="trending", src="AI 趋势",
+            metadata={"goal": "分析 AI", "language": "English"}
         )
         fetcher_en = TrendingFetcher(source_en)
         assert fetcher_en._get_target_language() == "English"
 
         # 2. 测试根据时区自动识别 (mock astimezone)
         source_auto = ContentSource(
-            type="trending", src="AI 趋势", goal="分析 AI",
-            metadata={"language": "auto"}
+            type="trending", src="AI 趋势",
+            metadata={"goal": "分析 AI", "language": "auto"}
         )
         fetcher_auto = TrendingFetcher(source_auto)
 

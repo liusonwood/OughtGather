@@ -113,22 +113,21 @@ class TestContentSource:
         assert source.priority == 0
         assert source.title is None
         assert source.keep_link == "Y"
-        assert source.full_text == "N"
+        assert source.metadata == {}
         assert source.exclude is None
         assert source.delete is None
-        assert source.goal is None
-        assert source.model is None
-        assert source.metadata is None
+        assert "goal" not in source.metadata
+        assert "model" not in source.metadata
 
     def test_trending_auto_goal(self):
         """测试 trending 类型未提供 goal 时自动填充默认值"""
         source = ContentSource(type="trending", src="AI 趋势")
-        assert source.goal == "分析并总结相关热点信息"
+        assert source.metadata["goal"] == "分析并总结相关热点信息"
 
     def test_trending_with_custom_goal(self):
         """测试 trending 类型使用自定义 goal"""
-        source = ContentSource(type="trending", src="AI", goal="自定义分析")
-        assert source.goal == "自定义分析"
+        source = ContentSource(type="trending", src="AI", metadata={"goal": "自定义分析"})
+        assert source.metadata["goal"] == "自定义分析"
 
     def test_all_fields_set(self):
         """测试所有字段都可正确赋值"""
@@ -138,22 +137,23 @@ class TestContentSource:
             priority=10,
             title="测试源",
             keep_link="N",
-            full_text="Y",
             exclude=[{"type": "start", "value": "test"}],
             delete="广告,推广",
-            goal="分析目标",
-            model="openai/gpt-4o",
-            metadata={"tag": "daily"},
+            metadata={
+                "tag": "daily",
+                "full_text": "Y",
+                "goal": "分析目标",
+                "model": "openai/gpt-4o",
+            },
         )
         assert source.priority == 10
         assert source.title == "测试源"
         assert source.keep_link == "N"
-        assert source.full_text == "Y"
         assert len(source.exclude) == 1
         assert source.delete == "广告,推广"
-        assert source.goal == "分析目标"
-        assert source.model == "openai/gpt-4o"
-        assert source.metadata == {"tag": "daily"}
+        assert source.metadata["full_text"] == "Y"
+        assert source.metadata["goal"] == "分析目标"
+        assert source.metadata["model"] == "openai/gpt-4o"
 
 
 # =========================================================================
@@ -221,7 +221,7 @@ class TestParseConfig:
 
         # 检查 RSS 源详细字段
         rss = config.body[0]
-        assert rss.full_text == "Y"
+        assert rss.metadata["full_text"] == "Y"
         assert len(rss.exclude) == 2
         assert rss.delete == "广告,推广"
 
@@ -232,8 +232,8 @@ class TestParseConfig:
 
         # 检查 trending 字段
         trending = config.body[3]
-        assert trending.goal == "分析 AI 发展方向"
-        assert trending.model == "openai/gpt-4o"
+        assert trending.metadata["goal"] == "分析 AI 发展方向"
+        assert trending.metadata["model"] == "openai/gpt-4o"
 
     def test_missing_title_raises(self):
         """测试缺少 title 抛出异常"""
@@ -249,6 +249,16 @@ class TestParseConfig:
         """测试 body 不是列表时抛出异常"""
         with pytest.raises(ValueError, match="body must be a non-empty array"):
             _parse_config({"title": {"text": "Test"}, "body": "not_a_list"})
+
+    @pytest.mark.parametrize("key", ["full_text", "goal", "model"])
+    def test_fetcher_options_must_be_nested_in_metadata(self, key):
+        """Fetcher 专属配置不得再出现在内容源顶层。"""
+        data = {
+            "title": {"text": "Test"},
+            "body": [{"type": "rss", "src": "https://example.com/rss", key: "Y"}],
+        }
+        with pytest.raises(ValueError, match="must be nested under metadata"):
+            _parse_config(data)
 
     def test_invalid_source_type_raises(self):
         """测试无效 source type 抛出异常"""

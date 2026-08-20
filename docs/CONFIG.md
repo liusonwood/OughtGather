@@ -102,7 +102,7 @@
 
 | metadata 键 | 类型 | 说明 |
 |------------|------|------|
-| `full_text` | string | 是否抓取完整正文。`"N"`（默认）→ 使用 feed 提供的摘要；`"Y"` → 访问原始 URL，用 trafilatura 提取全文，失败时回退到 BeautifulSoup 提取 `<article>`/`<main>` 等区域 |
+| `metadata.full_text` | string | 是否抓取完整正文。`"N"`（默认）→ 使用 feed 提供的摘要；`"Y"` → 访问原始 URL，用 trafilatura 提取全文，失败时回退到 BeautifulSoup 提取 `<article>`/`<main>` 等区域 |
 | `limit` | number | 限制抓取最大条目数，未设置时遵循全局 limit |
 
 ```json
@@ -190,8 +190,8 @@
 | 专属字段 | 类型 | 必填 | 说明 |
 |---------|------|------|------|
 | `src` | string | ✓ | 搜索关键词/主题，发送给 LLM 的主题文本 |
-| `goal` | string | | 分析目标/指令，告诉 LLM 要做什么。LLM 会输出 3-5 个要点 + 趋势分析 + 亮点。留空或不配置 → 自动使用默认值 `"分析并总结相关热点信息"` |
-| `model` | string | | OpenRouter 模型 ID。留空或不配置 → 默认使用 `"openai/gpt-3.5-turbo"`。也可通过环境变量 `OPENROUTER_MODEL` 设置全局默认模型（优先级低于此字段）。常用示例：`"openai/gpt-4o"`、`"anthropic/claude-3.5-sonnet"`、`"google/gemini-pro-1.5"` |
+| `metadata.goal` | string | | 分析目标/指令，告诉 LLM 要做什么。LLM 会输出 3-5 个要点 + 趋势分析 + 亮点。留空或不配置 → 自动使用默认值 `"分析并总结相关热点信息"` |
+| `metadata.model` | string | | OpenRouter 模型 ID。留空或不配置 → 默认使用 `"openai/gpt-3.5-turbo"`。也可通过环境变量 `OPENROUTER_MODEL` 设置全局默认模型（优先级低于此字段）。常用示例：`"openai/gpt-4o"`、`"anthropic/claude-3.5-sonnet"`、`"google/gemini-pro-1.5"` |
 
 ```json
 {
@@ -199,8 +199,10 @@
   "title": "AI 热点",
   "src": "人工智能最新发展趋势",
   "priority": 15,
-  "goal": "分析最新的 AI 技术突破和应用案例，重点关注大模型、Agent、多模态方向",
-  "model": "openai/gpt-4o"
+  "metadata": {
+    "goal": "分析最新的 AI 技术突破和应用案例，重点关注大模型、Agent、多模态方向",
+    "model": "openai/gpt-4o"
+  }
 }
 ```
 
@@ -281,8 +283,10 @@
       "src": "人工智能最新发展趋势",
       "title": "AI 行业热点",
       "priority": 15,
-      "goal": "分析最新的 AI 技术突破和应用案例，重点关注大模型、Agent、多模态方向",
-      "model": "openai/gpt-4o"
+      "metadata": {
+        "goal": "分析最新的 AI 技术突破和应用案例，重点关注大模型、Agent、多模态方向",
+        "model": "openai/gpt-4o"
+      }
     },
     {
       "type": "raindropio",

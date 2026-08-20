@@ -233,14 +233,14 @@ class TestImageBugs:
                 assert "https://example.com/test.jpg" in content
 
     def test_rss_fetcher_full_text_restores_graphic_tags(self):
-        """Test that RSSFetcher with full_text=Y restores <graphic> tags from trafilatura."""
+        """Test that RSSFetcher with metadata.full_text=Y restores <graphic> tags from trafilatura."""
         from src.fetchers.rss_fetcher import RSSFetcher
 
         source = ContentSource(
             type="rss",
             src="https://example.com/feed.xml",
             priority=10,
-            full_text="Y"
+            metadata={"full_text": "Y"}
         )
         fetcher = RSSFetcher(source)
 

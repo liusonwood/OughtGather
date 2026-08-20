@@ -27,7 +27,7 @@ def rss_source():
         title="Hacker News",
         priority=10,
         keep_link="Y",
-        full_text="N",
+        metadata={"full_text": "N"},
     )
 
 
@@ -76,8 +76,7 @@ def trending_source():
         src="AI 最新趋势",
         title="AI 热点",
         priority=15,
-        goal="分析最新 AI 发展",
-        model="openai/gpt-4o",
+        metadata={"goal": "分析最新 AI 发展", "model": "openai/gpt-4o"},
     )
 
 
@@ -139,7 +138,7 @@ def full_config_data():
                 "title": "RSS 源",
                 "priority": 10,
                 "keep_link": "Y",
-                "full_text": "Y",
+                "metadata": {"full_text": "Y"},
                 "exclude": [
                     {"type": "start", "value": "阅读更多"},
                     {"type": "end", "value": "— 完 —"},
@@ -169,8 +168,10 @@ def full_config_data():
                 "src": "AI 趋势",
                 "title": "AI 热点",
                 "priority": 15,
-                "goal": "分析 AI 发展方向",
-                "model": "openai/gpt-4o",
+                "metadata": {
+                    "goal": "分析 AI 发展方向",
+                    "model": "openai/gpt-4o",
+                },
             },
         ],
     }
@@ -233,4 +234,3 @@ def mock_cover_generator_network(monkeypatch):
 
     monkeypatch.setattr(CoverGenerator, "_fetch_bing_wallpaper", mock_fetch_bing_wallpaper)
     monkeypatch.setattr(CoverGenerator, "_download_image", mock_download_image)
-

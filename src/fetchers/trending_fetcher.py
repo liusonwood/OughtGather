@@ -24,7 +24,7 @@ class TrendingFetcher(BaseFetcher):
     
     # 按照配置规范注册 config_schema
     config_schema = {
-        "goal": {
+        "metadata.goal": {
             "type": "textarea",
             "label": "目标 (goal)",
             "placeholder": "LLM 分析目标，例如: 分析最新的 AI 技术突破..."
@@ -74,8 +74,8 @@ class TrendingFetcher(BaseFetcher):
     @classmethod
     def validate_source(cls, source: Any):
         """验证/修饰 trending 类型的 ContentSource 实例。"""
-        if not source.goal:
-            source.goal = "分析并总结相关热点信息"
+        if not source.metadata.get("goal"):
+            source.metadata["goal"] = "分析并总结相关热点信息"
 
     def __init__(self, source: ContentSource, global_limit: int = 15, max_retries: int = 3):
         """
@@ -122,7 +122,7 @@ class TrendingFetcher(BaseFetcher):
             return result
 
         # 检查是否有 goal 配置
-        if not self.source.goal:
+        if not self.source.metadata.get("goal"):
             result.success = False
             result.error = "goal is required for trending type"
             return result
@@ -151,7 +151,7 @@ class TrendingFetcher(BaseFetcher):
                 author=model,
                 published_date=today,
                 metadata={
-                    "goal": self.source.goal,
+                    "goal": self.source.metadata.get("goal"),
                     "model": model,
                     "has_search_context": len(search_results) > 0
                 }
@@ -252,9 +252,9 @@ class TrendingFetcher(BaseFetcher):
             "Content-Type": "application/json"
         }
 
-        # 确定使用的模型：source.model > OPENROUTER_MODEL secret > 默认值
+        # 确定使用的模型：metadata.model > OPENROUTER_MODEL secret > 默认值
         model = (
-            self.source.model
+            self.source.metadata.get("model")
             or (self.config.get("model") if self.config else None)
             or "google/gemma-4-31b-it:free"
         )
@@ -367,7 +367,7 @@ class TrendingFetcher(BaseFetcher):
 
 **Current Date**: {today}
 **Topic**: {self.source.src}
-**Core Goal**: {self.source.goal}
+**Core Goal**: {self.source.metadata.get("goal")}
 {search_context}
 
 ## Output Requirements

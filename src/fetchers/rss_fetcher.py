@@ -203,7 +203,7 @@ class RSSFetcher(BaseFetcher):
 
         # 提取内容
         metadata = self.source.metadata or {}
-        full_text = metadata.get("full_text") or self.source.full_text
+        full_text = metadata.get("full_text", "N")
         if full_text == "Y":
             # 抓取完整正文（使用 trafilatura）
             content, raw_html = self._fetch_full_text(link)

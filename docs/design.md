@@ -32,8 +32,8 @@
 | `chop` | String (Regex) | 支持 Python 的基础切片指令（/[数字:数字]），截取并从正文中**删除**。 |
 | `exclude` | String | 删除指定**开头**或**结尾**的无用内容块。 |
 | `delete` | String | 当标题包含关键词不抓取 |
-| `goal` | String | （仅针对 `trending`）分析目标，可选，有默认值。 |
-| `model` | String | （仅针对 `trending`）指定使用的模型，默认留空则使用全局配置模型。 |
+| `metadata.goal` | String | （仅针对 `trending`）分析目标，可选，有默认值。 |
+| `metadata.model` | String | （仅针对 `trending`）指定使用的模型，默认留空则使用全局配置模型。 |
 
 ## 4. 数据抓取与处理逻辑 (Data Fetching & Processing)
 根据配置项 `keep_link`, `chop`, `delete`, `exclude` 执行清洗，提取核心正文。
@@ -49,7 +49,7 @@
 3.  **Web (网页):**
     *   通过类似于 trafilatura 的工具提取正文并降噪。
 4.  **Trending (热点分析):**
-    *   **触发条件：** 只有满足goal设置条件（且配置了正确的 API Key）时才会调用，否则报错拦截。
+    *   **触发条件：** 只有满足 `metadata.goal` 设置条件（且配置了正确的 API Key）时才会调用，否则报错拦截。
     *   **执行逻辑：** 根据 `src` 传入的关键词或描述性语句，调用 Open Router API (LLM) 进行热点信息汇总分析，生成文本。
 5.  **图片处理规则 (针对所有类型):**
     *   将包含特殊标记/样式的图片转化为正常的 Markdown/HTML 图片标签插入正文。
