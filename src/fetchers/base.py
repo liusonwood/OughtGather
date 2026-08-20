@@ -478,7 +478,18 @@ class BaseFetcher(ABC):
             cached_token = WafTokenCache.get(domain) or WafTokenCache.get(base_domain)
 
             s = cffi_requests.Session(impersonate="chrome120")
-            req_headers = dict(headers or {})
+            # 过滤静态伪造的客户端头，由 curl_cffi 自动生成与底层 TLS 严格匹配的指纹请求头
+            req_headers = {}
+            if headers:
+                for k, v in headers.items():
+                    if k.lower() not in (
+                        "user-agent",
+                        "sec-ch-ua",
+                        "sec-ch-ua-mobile",
+                        "sec-ch-ua-platform",
+                    ):
+                        req_headers[k] = v
+
             if cached_token:
                 cookie_val = f"aws-waf-token={cached_token}"
                 if "Cookie" in req_headers:
@@ -486,6 +497,8 @@ class BaseFetcher(ABC):
                         req_headers["Cookie"] += f"; {cookie_val}"
                 else:
                     req_headers["Cookie"] = cookie_val
+                s.cookies.set("aws-waf-token", cached_token, domain=domain)
+                s.cookies.set("aws-waf-token", cached_token, domain=f".{base_domain}")
 
             resp = s.get(url, headers=req_headers, timeout=timeout, params=params)
 
@@ -497,7 +510,7 @@ class BaseFetcher(ABC):
                     s,
                     url,
                     resp.text,
-                    user_agent=req_headers.get("User-Agent", ""),
+                    user_agent=headers.get("User-Agent", "") if headers else "",
                     timeout=timeout,
                 )
                 if token:
@@ -508,6 +521,8 @@ class BaseFetcher(ABC):
                         )
                     else:
                         req_headers["Cookie"] = cookie_val
+                    s.cookies.set("aws-waf-token", token, domain=domain)
+                    s.cookies.set("aws-waf-token", token, domain=f".{base_domain}")
                     resp = s.get(url, headers=req_headers, timeout=timeout, params=params)
 
             if resp.status_code < 400 and not (
