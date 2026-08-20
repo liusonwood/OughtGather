@@ -276,3 +276,23 @@ class TestBaseFetcherIntegration:
             assert resp.status_code == 200
             assert b"Success Feed" in resp.content
             mock_solver.assert_called_once()
+
+    def test_curl_cffi_fallback_and_waf_solve(self):
+        source = ContentSource(type="dummy", src="https://www.scientificamerican.com/feed/")
+        fetcher = DummyFetcher(source)
+
+        mock_cffi_resp = MagicMock()
+        mock_cffi_resp.status_code = 200
+        mock_cffi_resp.content = b"<html><body>Recovered Content</body></html>"
+        mock_cffi_resp.text = "<html><body>Recovered Content</body></html>"
+        mock_cffi_resp.url = source.src
+        mock_cffi_resp.headers = {}
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_cffi_resp
+
+        with patch("curl_cffi.requests.Session", return_value=mock_session):
+            res = fetcher._curl_cffi_fallback(source.src)
+            assert res is not None
+            assert res.status_code == 200
+            assert b"Recovered Content" in res.content

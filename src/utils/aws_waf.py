@@ -353,17 +353,31 @@ def solve_aws_waf(
         }
 
         verify_url = f"{ctx.api_base}/verify"
-        verify_resp = client.post(
-            verify_url,
-            headers={
-                "User-Agent": user_agent,
-                "Content-Type": "application/json",
-                "Accept": "*/*",
-                "Referer": target_url,
-            },
-            content=json.dumps(verify_body, separators=(",", ":"), ensure_ascii=False),
-            timeout=timeout,
-        )
+        payload = json.dumps(verify_body, separators=(",", ":"), ensure_ascii=False)
+        try:
+            verify_resp = client.post(
+                verify_url,
+                headers={
+                    "User-Agent": user_agent,
+                    "Content-Type": "application/json",
+                    "Accept": "*/*",
+                    "Referer": target_url,
+                },
+                content=payload,
+                timeout=timeout,
+            )
+        except TypeError:
+            verify_resp = client.post(
+                verify_url,
+                headers={
+                    "User-Agent": user_agent,
+                    "Content-Type": "application/json",
+                    "Accept": "*/*",
+                    "Referer": target_url,
+                },
+                data=payload,
+                timeout=timeout,
+            )
 
         if verify_resp.status_code != 200:
             logger.warning(

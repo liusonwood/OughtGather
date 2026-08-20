@@ -165,10 +165,15 @@ class BaseFetcher(ABC):
 
     def get_limit(self) -> int:
         """
-        获取当前源的抓取限制条目数（优先取 metadata.limit，其次取全局 global_limit）。
+        获取当前源的抓取限制条目数（优先取 source.limit / metadata.limit，其次取全局 global_limit）。
         """
         metadata = self.source.metadata or {}
-        return int(metadata.get("limit", self.global_limit))
+        src_limit = getattr(self.source, "limit", None)
+        if src_limit is not None and str(src_limit).isdigit():
+            return int(src_limit)
+        if "limit" in metadata and metadata["limit"] is not None and str(metadata["limit"]).isdigit():
+            return int(metadata["limit"])
+        return int(self.global_limit)
 
     @abstractmethod
     def fetch(self) -> FetchResult:
@@ -359,7 +364,22 @@ class BaseFetcher(ABC):
         )
         response.read()  # 确保读取响应体
 
-        # 优先处理 AWS WAF 挑战（HTTP 202 或 x-amzn-waf-action 响应）
+        # 若收到 WAF 挑战（HTTP 202）或 403 阻断，优先使用 curl_cffi（Chrome 真实 TLS 指纹）绕过
+        if browser and method.upper() == "GET" and (
+            self._is_waf_challenge(response) or self._should_try_cloudscraper(response, reject_html=reject_html)
+        ):
+            cffi_fallback = self._curl_cffi_fallback(
+                url, headers=default_headers, timeout=timeout, params=params
+            )
+            if (
+                cffi_fallback is not None
+                and cffi_fallback.status_code < 400
+                and not self._is_waf_challenge(cffi_fallback)
+                and not (reject_html and self._looks_like_html(cffi_fallback))
+            ):
+                return cffi_fallback
+
+        # 若 curl_cffi 不可用或未恢复，且收到 AWS WAF 挑战，尝试基于 httpx 的算法求解
         if browser and method.upper() == "GET" and self._is_waf_challenge(response):
             reason = self._block_reason(response)
             self.logger.warning(
@@ -438,6 +458,74 @@ class BaseFetcher(ABC):
         if raise_for_status:
             response.raise_for_status()
         return response
+
+    def _curl_cffi_fallback(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        timeout: int = DEFAULT_TIMEOUT,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Optional[_CompatResponse]:
+        """使用 curl_cffi 模拟真实浏览器 TLS 协议指纹（Chrome 120），突破严苛的 WAF 拦截。"""
+        try:
+            from curl_cffi import requests as cffi_requests
+        except ImportError:
+            return None
+
+        try:
+            domain = urlparse(url).netloc
+            base_domain = domain.replace("www.", "")
+            cached_token = WafTokenCache.get(domain) or WafTokenCache.get(base_domain)
+
+            s = cffi_requests.Session(impersonate="chrome120")
+            req_headers = dict(headers or {})
+            if cached_token:
+                cookie_val = f"aws-waf-token={cached_token}"
+                if "Cookie" in req_headers:
+                    if "aws-waf-token" not in req_headers["Cookie"]:
+                        req_headers["Cookie"] += f"; {cookie_val}"
+                else:
+                    req_headers["Cookie"] = cookie_val
+
+            resp = s.get(url, headers=req_headers, timeout=timeout, params=params)
+
+            # 如果 curl_cffi 也收到了 202 挑战，用该 session 执行算法求解
+            if resp.status_code == 202 or (
+                resp.headers.get("x-amzn-waf-action", "").lower() in ("challenge", "captcha")
+            ):
+                token = solve_aws_waf(
+                    s,
+                    url,
+                    resp.text,
+                    user_agent=req_headers.get("User-Agent", ""),
+                    timeout=timeout,
+                )
+                if token:
+                    cookie_val = f"aws-waf-token={token}"
+                    if "Cookie" in req_headers:
+                        req_headers["Cookie"] = re.sub(
+                            r"aws-waf-token=[^;]+", cookie_val, req_headers["Cookie"]
+                        )
+                    else:
+                        req_headers["Cookie"] = cookie_val
+                    resp = s.get(url, headers=req_headers, timeout=timeout, params=params)
+
+            if resp.status_code < 400 and not (
+                resp.status_code == 202
+                or resp.headers.get("x-amzn-waf-action", "").lower() in ("challenge", "captcha")
+            ):
+                self.logger.info(f"curl_cffi (browser TLS) recovered {url} ({resp.status_code})")
+                return _CompatResponse(
+                    content=resp.content,
+                    status_code=resp.status_code,
+                    text=resp.text,
+                    url=str(resp.url),
+                    headers=dict(resp.headers),
+                )
+            return None
+        except Exception as e:
+            self.logger.debug(f"curl_cffi fallback failed for {url}: {e}")
+            return None
 
     def _cloudscraper_fallback(
         self,
