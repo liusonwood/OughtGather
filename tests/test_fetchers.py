@@ -187,9 +187,9 @@ class TestBaseFetcherMakeRequest:
         fetcher._client = mock_client
 
         with patch.object(fetcher, "_make_browser_request") as fallback:
-            result = fetcher._make_request("https://api.example.com")
+            with pytest.raises(Exception, match="Unexpected HTTP status 403"):
+                fetcher._make_request("https://api.example.com")
 
-        assert result is mock_response
         fallback.assert_not_called()
 
     def test_browser_failure_preserves_original_non_200_error(self):

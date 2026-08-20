@@ -81,6 +81,7 @@ jobs:
         run: uv pip install --system -r requirements.txt
 
       - name: Cache Playwright browsers
+        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
@@ -88,8 +89,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-playwright-
 
+      - name: Install Playwright system dependencies
+        run: playwright install-deps chromium
+
       - name: Install Playwright Chromium
-        run: playwright install --with-deps chromium
+        run: playwright install chromium
 
       - name: Prepare config.json
         env:

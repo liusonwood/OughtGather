@@ -126,7 +126,8 @@ class BaseFetcher(ABC):
         self._browser = None
         self._browser_context = None
 
-    def __del__(self):
+    def close(self):
+        """显式释放 HTTP 和 Playwright 资源；可安全重复调用。"""
         try:
             if hasattr(self, '_client') and self._client and not self._client.is_closed:
                 self._client.close()
@@ -134,6 +135,13 @@ class BaseFetcher(ABC):
             pass
         try:
             self._close_browser()
+        except Exception:
+            pass
+
+    def __del__(self):
+        # 作为未显式 close() 时的最后兜底；主流程不依赖析构时机释放资源。
+        try:
+            self.close()
         except Exception:
             pass
 
@@ -315,14 +323,13 @@ class BaseFetcher(ABC):
 
         if raise_for_status:
             if isinstance(status_code, int) and status_code != 200:
-                # httpx 不会对 3xx/202 抛异常，但页面请求的契约是最终必须为
-                # 200；为这些状态构造可诊断的 HTTPStatusError。
-                if 200 <= status_code < 300:
-                    raise httpx.HTTPStatusError(
-                        f"Unexpected HTTP status {status_code}",
-                        request=response.request,
-                        response=response,
-                    )
+                # httpx 对 3xx/202 不会自动抛异常，但页面请求的契约是最终
+                # 必须为 200，因此所有非 200 都要保留为可诊断错误。
+                raise httpx.HTTPStatusError(
+                    f"Unexpected HTTP status {status_code}",
+                    request=response.request,
+                    response=response,
+                )
             response.raise_for_status()
         return response
 
@@ -341,62 +348,87 @@ class BaseFetcher(ABC):
                 "'playwright' package and Chromium"
             ) from exc
 
-        if self._browser_context is None:
+        if self._browser is None:
             self._playwright = sync_playwright().start()
             self._browser = self._playwright.chromium.launch(headless=True)
 
-            browser_headers = {
-                key: value for key, value in (headers or {}).items()
-                if key.lower() not in {"host", "content-length", "connection", "user-agent"}
-            }
-            user_agent = next(
-                (value for key, value in (headers or {}).items()
-                 if key.lower() == "user-agent"),
-                None,
-            )
-            self._browser_context = self._browser.new_context(
-                user_agent=user_agent,
-                extra_http_headers=browser_headers or None,
-            )
-
-        page = self._browser_context.new_page()
-        document_statuses = []
-
-        def record_document_response(response):
-            if response.request.resource_type == "document":
-                document_statuses.append(response.status)
-
-        page.on("response", record_document_response)
+        browser_headers = {
+            key: value for key, value in (headers or {}).items()
+            if key.lower() not in {"host", "content-length", "connection", "user-agent"}
+        }
+        user_agent = next(
+            (value for key, value in (headers or {}).items()
+             if key.lower() == "user-agent"),
+            None,
+        )
+        # 每次请求创建 context，避免不同请求的 headers/cookies 互相污染；
+        # Chromium 进程本身仍在当前 fetcher 内复用。
+        self._browser_context = self._browser.new_context(
+            user_agent=user_agent,
+            extra_http_headers=browser_headers or None,
+        )
+        context = self._browser_context
         try:
-            page.goto(url, wait_until="networkidle", timeout=timeout * 1000)
-            final_status = document_statuses[-1] if document_statuses else None
-            if final_status is None:
-                raise RuntimeError("browser navigation returned no document response")
-            if not 200 <= final_status < 300:
-                raise RuntimeError(f"browser navigation ended with HTTP {final_status}")
+            page = context.new_page()
+            document_statuses = []
 
-            html = page.content()
-            request = httpx.Request("GET", page.url or url, headers=headers or {})
-            return httpx.Response(
-                status_code=final_status,
-                headers={"content-type": "text/html; charset=utf-8"},
-                content=html.encode("utf-8"),
-                request=request,
-            )
+            def record_document_response(response):
+                if response.request.resource_type == "document":
+                    document_statuses.append(response.status)
+
+            page.on("response", record_document_response)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                deadline = time.monotonic() + timeout
+                while (
+                    not document_statuses
+                    or not 200 <= document_statuses[-1] < 300
+                ) and time.monotonic() < deadline:
+                    # 不等待 networkidle，避免长轮询/分析请求导致无谓超时；
+                    # 仅等待文档响应最终完成挑战并跳转到 2xx。
+                    page.wait_for_timeout(250)
+                final_status = document_statuses[-1] if document_statuses else None
+                if final_status is None:
+                    raise RuntimeError("browser navigation returned no document response")
+                if not 200 <= final_status < 300:
+                    raise RuntimeError(f"browser navigation ended with HTTP {final_status}")
+
+                html = page.content()
+                request = httpx.Request("GET", page.url or url, headers=headers or {})
+                return httpx.Response(
+                    status_code=final_status,
+                    headers={"content-type": "text/html; charset=utf-8"},
+                    content=html.encode("utf-8"),
+                    request=request,
+                )
+            finally:
+                try:
+                    page.close()
+                except Exception:
+                    pass
         finally:
-            page.close()
+            try:
+                context.close()
+            except Exception:
+                pass
+            self._browser_context = None
 
     def _close_browser(self):
         """关闭当前 fetcher 的 Playwright 资源。"""
-        if self._browser_context is not None:
-            self._browser_context.close()
-            self._browser_context = None
-        if self._browser is not None:
-            self._browser.close()
-            self._browser = None
-        if self._playwright is not None:
-            self._playwright.stop()
-            self._playwright = None
+        context = self._browser_context
+        browser = self._browser
+        playwright = self._playwright
+        self._browser_context = None
+        self._browser = None
+        self._playwright = None
+
+        for resource in (context, browser, playwright):
+            if resource is None:
+                continue
+            try:
+                (resource.close if resource is not playwright else resource.stop)()
+            except Exception:
+                pass
 
     def _resolve_url(self, url: str, base_url: Optional[str] = None) -> str:
         """

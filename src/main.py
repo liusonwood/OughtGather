@@ -206,6 +206,7 @@ def main(argv=None):
 
             def fresh_start_task(source: ContentSource) -> Tuple[FetchResult, List[Tuple[int, str]]]:
                 start_task_buffer()
+                fetcher = None
                 try:
                     fetcher = get_fetcher(source, global_limit=999999)
                     if not fetcher.dedup_enabled:
@@ -237,10 +238,14 @@ def main(argv=None):
                                 f"标记 {marked_count} 条文章 URL"
                             )
                             res.articles = []
+                    fetcher.close()
+                    fetcher = None
                     records = stop_task_buffer()
                     return res, records
                 except Exception as e:
                     logger.error(f"[Fresh Start] 异常失败 {source.src}: {e}")
+                    if fetcher is not None:
+                        fetcher.close()
                     res = FetchResult(source=source, articles=[], success=False, error=str(e))
                     records = stop_task_buffer()
                     return res, records
@@ -276,6 +281,7 @@ def main(argv=None):
 
         def fetch_source_task(source: ContentSource) -> Tuple[FetchResult, List[Tuple[int, str]]]:
             start_task_buffer()
+            fetcher = None
             try:
                 fetcher = get_fetcher(source, global_limit=config.limit)
 
@@ -320,10 +326,14 @@ def main(argv=None):
                 else:
                     res = fetcher.fetch_with_retry()
 
+                fetcher.close()
+                fetcher = None
                 records = stop_task_buffer()
                 return res, records
             except Exception as e:
                 logger.error(f"抓取异常失败 {source.src}: {e}")
+                if fetcher is not None:
+                    fetcher.close()
                 res = FetchResult(source=source, articles=[], success=False, error=str(e))
                 records = stop_task_buffer()
                 return res, records
@@ -432,4 +442,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-
