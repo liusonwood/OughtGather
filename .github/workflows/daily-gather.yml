@@ -90,6 +90,7 @@ jobs:
             ${{ runner.os }}-playwright-
 
       - name: Install Playwright system dependencies
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: playwright install-deps chromium
 
       - name: Install Playwright Chromium
