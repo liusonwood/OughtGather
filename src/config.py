@@ -171,10 +171,16 @@ def _parse_config(data: Dict[str, Any]) -> Config:
     sources = []
     for idx, source_data in enumerate(data["body"]):
         try:
+            raw_priority = source_data.get("priority")
+            try:
+                priority = int(raw_priority) if raw_priority is not None and str(raw_priority).strip() != "" else 0
+            except (ValueError, TypeError):
+                priority = 0
+
             source = ContentSource(
                 type=source_data.get("type"),
                 src=source_data.get("src"),
-                priority=source_data.get("priority", 0),
+                priority=priority,
                 title=source_data.get("title"),
                 keep_link=source_data.get("keep_link", "Y"),
                 full_text=source_data.get("full_text", "N"),
