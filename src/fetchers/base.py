@@ -389,14 +389,14 @@ class BaseFetcher(ABC):
                 if initial_status == 202:
                     deadline = time.monotonic() + timeout
                     while (
-                        not 200 <= final_status < 300
+                        (not 200 <= final_status < 300 or final_status == 202)
                         and time.monotonic() < deadline
                     ):
                         # 不等待 networkidle，避免长轮询/分析请求导致无谓超时；
                         # 仅等待 202 挑战完成并跳转到 2xx。
                         page.wait_for_timeout(250)
                         final_status = document_statuses[-1] if document_statuses else None
-                if not 200 <= final_status < 300:
+                if not 200 <= final_status < 300 or final_status == 202:
                     raise RuntimeError(f"browser navigation ended with HTTP {final_status}")
 
                 html = page.content()
