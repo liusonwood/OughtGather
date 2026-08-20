@@ -60,19 +60,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
           # 需要写入权限来更新去重文件
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "requirements.txt"
@@ -83,7 +83,7 @@ jobs:
       - name: Cache Playwright browsers
         # Playwright 安装与缓存说明见 docs/PLAYWRIGHT.md。
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}
@@ -116,7 +116,7 @@ jobs:
           echo "✓ config.json is valid"
 
       - name: Cache dedup records
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: data/fetched_urls.txt
           key: ${{ runner.os }}-dedup-${{ github.run_id }}
@@ -157,7 +157,7 @@ jobs:
 
       - name: Upload EPUB artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: epub-files
           path: output/*.epub
@@ -166,7 +166,7 @@ jobs:
       - name: Upload dedup records
         # 上传去重数据文件（data/fetched_urls.txt），仅在失败或手动触发时执行，便于排查
         if: failure() || github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dedup-records
           path: data/fetched_urls.txt
@@ -176,7 +176,7 @@ jobs:
       - name: Upload logs
         # 仅在失败或手动触发时上传运行日志，节省正常定时运行的 Artifact 开销与时间
         if: failure() || github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: logs
           path: logs/*.log
