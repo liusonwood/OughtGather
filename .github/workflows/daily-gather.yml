@@ -81,6 +81,7 @@ jobs:
         run: uv pip install --system -r requirements.txt
 
       - name: Cache Playwright browsers
+        # Playwright 安装与缓存说明见 docs/PLAYWRIGHT.md。
         id: playwright-cache
         uses: actions/cache@v4
         with:
