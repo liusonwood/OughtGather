@@ -6,8 +6,8 @@
   "limit": 5,
   "body": [
     {
-      "type": "rss",
-      "src": "https://raw.githubusercontent.com/liusonwood/rssqweather/main/weather.xml",
+      "type": "web",
+      "src": "https://www.scientificamerican.com/article/moderna-and-merck-announce-landmark-trial-showing-mrna-therapy-significantly-cuts-odds-of-recurrent-skin-cancer/",
       "title": "",
       "priority": "",
       "keep_link": ""

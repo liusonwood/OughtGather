@@ -127,7 +127,10 @@ class BaseFetcher(ABC):
         self._browser_context = None
 
     def close(self):
-        """显式释放 HTTP 和 Playwright 资源；可安全重复调用。"""
+        """显式释放 HTTP 和 Playwright 资源；可安全重复调用。
+
+        资源生命周期约定见 docs/PLAYWRIGHT.md。
+        """
         try:
             if hasattr(self, '_client') and self._client and not self._client.is_closed:
                 self._client.close()
@@ -303,7 +306,7 @@ class BaseFetcher(ABC):
         )
         response.read()  # 确保读取响应体
 
-        # 只有明确标记的 HTML 页面请求才启用浏览器，避免 API/XML 请求
+        # Playwright 回退说明见 docs/PLAYWRIGHT.md。只有明确标记的 HTML 页面请求才启用浏览器，避免 API/XML 请求
         # 在遇到普通错误时启动 Chromium。
         status_code = getattr(response, "status_code", None)
         if allow_browser_fallback and isinstance(status_code, int) and status_code != 200:
@@ -343,7 +346,10 @@ class BaseFetcher(ABC):
         headers: Optional[Dict[str, str]] = None,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> httpx.Response:
-        """使用复用的 Headless Chromium 执行页面 JavaScript 并返回 HTML。"""
+        """使用复用的 Headless Chromium 执行页面 JavaScript 并返回 HTML。
+
+        详细行为和状态码约定见 docs/PLAYWRIGHT.md。
+        """
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
