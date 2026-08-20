@@ -441,11 +441,18 @@ class TestEpubcheck:
     def setup_method(self, method):
         """检查 epubcheck 是否可用，不可用则跳过并提示"""
         if not shutil.which("java"):
-            pytest.skip("⚠ EPUB 合规测试不存在：未找到 Java 运行时，请先安装 Java")
+            pytest.skip("⚠ 未找到 Java 命令，请先安装 Java")
+
+        try:
+            res = subprocess.run(["java", "-version"], capture_output=True, text=True, timeout=5)
+            if res.returncode != 0 or "Unable to locate a Java Runtime" in res.stderr:
+                pytest.skip(f"⚠ Java 运行时不可用，跳过 epubcheck 测试: {res.stderr.strip()}")
+        except Exception as e:
+            pytest.skip(f"⚠ 无法运行 Java，跳过 epubcheck 测试: {e}")
 
         jar = self._epubcheck_jar()
         if not os.path.exists(jar):
-            pytest.skip(f"⚠ EPUB 合规测试不存在：未找到 {jar}，请参考 README 配置 epubcheck")
+            pytest.skip(f"⚠ 未找到 {jar}，请参考 README 配置 epubcheck")
 
     @staticmethod
     def _epubcheck_jar():
