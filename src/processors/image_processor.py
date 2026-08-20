@@ -109,8 +109,15 @@ class ImageProcessor:
             Optional[bytes]: 图片数据
         """
         try:
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            }
             with httpx.Client(timeout=8, follow_redirects=True) as client:
-                response = client.get(url, headers={"User-Agent": "OughtGather/1.0"})
+                response = client.get(url, headers=headers)
                 response.raise_for_status()
                 return response.content
 
