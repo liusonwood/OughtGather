@@ -1,329 +1,209 @@
-"""
-去重追踪器测试
-测试 DedupTracker 的加载、标记、保存、清理和统计行为
-"""
+"""DedupTracker 的 source 快照语义测试。"""
 
+import concurrent.futures
 import os
-import pytest
+from unittest.mock import MagicMock, patch
 
+from src.config import ContentSource
 from src.dedup.tracker import DedupTracker
-from src.utils.helpers import generate_content_id
+from src.fetchers.base import Article, BaseFetcher, FetchResult
+from src.fetchers.rss_fetcher import RSSFetcher
+from src.fetchers.trending_fetcher import TrendingFetcher
+from src.fetchers.weather_fetcher import WeatherFetcher
+from src.fetchers.web_fetcher import WebFetcher
+from src.main import main, process_results
 
 
-# =========================================================================
-# 基本功能测试
-# =========================================================================
+def url(number):
+    return f"https://example.com/article/{number}"
 
-class TestDedupTrackerBasic:
-    """DedupTracker 基本功能测试"""
 
-    def test_new_tracker_empty(self, tmp_dir):
-        """新建 tracker 时 fetched_ids 为空"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-        assert tracker.fetched_ids == set()
-        assert tracker.new_ids == set()
+def test_new_tracker_empty(tmp_dir):
+    tracker = DedupTracker(os.path.join(tmp_dir, "fetched_urls.txt"))
+    assert tracker.fetched_ids == set()
+    assert tracker.new_ids == set()
 
-    def test_mark_as_fetched(self, tmp_dir):
-        """标记为已抓取后 is_fetched 返回 True"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
 
-        assert tracker.is_fetched("https://example.com", "标题") is False
+def test_mark_and_query_are_source_scoped(tmp_dir):
+    tracker = DedupTracker(os.path.join(tmp_dir, "fetched_urls.txt"))
+    tracker.mark_as_fetched(url(1), "rss:feed-a")
 
-        tracker.mark_as_fetched("https://example.com", "标题")
+    assert tracker.is_fetched(url(1), "rss:feed-a")
+    assert not tracker.is_fetched(url(1), "rss:feed-b")
 
-        assert tracker.is_fetched("https://example.com", "标题") is True
 
-    def test_mark_same_url_different_title(self, tmp_dir):
-        """仅 URL 决定去重：相同 URL 不同标题视为已抓取"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
+def test_snapshot_replaces_previous_ids_for_same_source(tmp_dir):
+    tracker = DedupTracker(os.path.join(tmp_dir, "fetched_urls.txt"))
+    source_key = "rss:feed-a"
+    tracker.stage_source_snapshot(source_key, [url(1), url(2)])
+    tracker.save()
+    tracker.stage_source_snapshot(source_key, [url(2), url(3)])
+    tracker.save()
 
-        tracker.mark_as_fetched("https://example.com", "标题A")
-        assert tracker.is_fetched("https://example.com", "标题A") is True
-        assert tracker.is_fetched("https://example.com", "标题B") is True
+    assert not tracker.is_fetched(url(1), source_key)
+    assert tracker.is_fetched(url(2), source_key)
+    assert tracker.is_fetched(url(3), source_key)
 
-    def test_mark_same_url_no_title(self, tmp_dir):
-        """URL 相同且都不带标题视为相同内容"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-
-        tracker.mark_as_fetched("https://example.com")
-        assert tracker.is_fetched("https://example.com") is True
-
-    def test_new_ids_tracked(self, tmp_dir):
-        """mark_as_fetched 记录 URL 哈希到 new_ids"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-
-        tracker.mark_as_fetched("https://example.com/a", "A")
-        tracker.mark_as_fetched("https://example.com/b", "B")
-
-        # 每篇文章产生 1 条 URL 哈希
-        assert len(tracker.new_ids) == 2
-
-    def test_mark_already_fetched_not_in_new_ids(self, tmp_dir):
-        """重复标记已抓取的 URL 不会增加 new_ids"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-
-        tracker.mark_as_fetched("https://example.com", "标题")
-        tracker.mark_as_fetched("https://example.com", "标题")  # 重复
-
-        assert len(tracker.new_ids) == 1
-
-    def test_clear(self, tmp_dir):
-        """clear 方法清空文件与内存缓存"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-        tracker.mark_as_fetched("https://example.com/a")
-        tracker.save()
-
-        assert tracker.is_fetched("https://example.com/a") is True
-        tracker.clear()
-        assert tracker.is_fetched("https://example.com/a") is False
-        assert len(tracker.fetched_ids) == 0
-        assert len(tracker.new_ids) == 0
-
-
-# =========================================================================
-# 持久化测试
-# =========================================================================
-
-class TestDedupTrackerPersistence:
-    """DedupTracker 持久化测试"""
-
-    def test_save_and_reload(self, tmp_dir):
-        """保存后重新加载能恢复记录"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-
-        # 第一次：标记并保存
-        tracker1 = DedupTracker(data_file)
-        tracker1.mark_as_fetched("https://example.com/a", "A")
-        tracker1.mark_as_fetched("https://example.com/b", "B")
-        tracker1.save()
-
-        # 第二次：重新加载
-        tracker2 = DedupTracker(data_file)
-        assert tracker2.is_fetched("https://example.com/a", "A") is True
-        assert tracker2.is_fetched("https://example.com/b", "B") is True
-        assert tracker2.is_fetched("https://example.com/c", "C") is False
-
-    def test_save_clears_new_ids(self, tmp_dir):
-        """save 后 self.new_ids 被清空，防止重复保存"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-
-        tracker.mark_as_fetched("https://example.com/a")
-        assert len(tracker.new_ids) == 1
-
-        tracker.save()
-        assert len(tracker.new_ids) == 0
-
-    def test_save_appends_not_overwrites(self, tmp_dir):
-        """save 是追加模式，不覆盖已有记录"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-
-        # 第一次保存
-        tracker1 = DedupTracker(data_file)
-        tracker1.mark_as_fetched("https://example.com/a", "A")
-        tracker1.save()
-
-        # 第二次保存
-        tracker2 = DedupTracker(data_file)
-        tracker2.mark_as_fetched("https://example.com/b", "B")
-        tracker2.save()
-
-        # 验证两条记录都存在
-        tracker3 = DedupTracker(data_file)
-        assert tracker3.is_fetched("https://example.com/a", "A") is True
-        assert tracker3.is_fetched("https://example.com/b", "B") is True
-
-    def test_save_no_new_ids_is_noop(self, tmp_dir):
-        """没有新记录时 save 不写入文件"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-        tracker.save()
-        assert not os.path.exists(data_file)
-
-    def test_creates_directory_if_missing(self, tmp_dir):
-        """保存时自动创建目录"""
-        data_file = os.path.join(tmp_dir, "subdir", "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-        tracker.mark_as_fetched("https://example.com", "标题")
-        tracker.save()
-        assert os.path.exists(data_file)
-
-    def test_load_missing_file(self, tmp_dir):
-        """加载不存在的文件不报错"""
-        data_file = os.path.join(tmp_dir, "nonexistent.txt")
-        tracker = DedupTracker(data_file)
-        assert len(tracker.fetched_ids) == 0
-
-    def test_concurrent_mark_and_save(self, tmp_dir):
-        """并发 mark_as_fetched、is_fetched 与 save 的线程安全性测试"""
-        import concurrent.futures
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-
-        def worker(i):
-            url = f"https://example.com/item_{i}"
-            tracker.mark_as_fetched(url)
-            assert tracker.is_fetched(url) is True
-            if i % 10 == 0:
-                tracker.save()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(worker, i) for i in range(100)]
-            for f in futures:
-                f.result()
-
-        tracker.save()
-        stats = tracker.get_stats()
-        assert stats["total_fetched"] == 100
-
-
-# =========================================================================
-# 统计与清理测试
-# =========================================================================
-
-class TestDedupTrackerStats:
-    """DedupTracker 统计与清理测试"""
-
-    def test_get_stats(self, tmp_dir):
-        """get_stats 返回正确统计"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-
-        tracker.mark_as_fetched("https://example.com/a", "A")
-        tracker.mark_as_fetched("https://example.com/b", "B")
-
-        stats = tracker.get_stats()
-        assert stats["total_fetched"] == 2
-        assert stats["new_fetched"] == 2
-
-    def test_get_stats_after_save(self, tmp_dir):
-        """save 后 get_stats 依然正确返回本次新增入库数"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-
-        tracker.mark_as_fetched("https://example.com/a", "A")
-        tracker.mark_as_fetched("https://example.com/b", "B")
-        tracker.save()
-
-        stats = tracker.get_stats()
-        assert stats["total_fetched"] == 2
-        assert stats["new_fetched"] == 2
-
-    def test_get_stats_after_reload(self, tmp_dir):
-        """重新加载后 new_fetched 为 0"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-
-        tracker1 = DedupTracker(data_file)
-        tracker1.mark_as_fetched("https://example.com", "标题")
-        tracker1.save()
-
-        tracker2 = DedupTracker(data_file)
-        stats = tracker2.get_stats()
-        assert stats["total_fetched"] == 1
-        assert stats["new_fetched"] == 0
-
-    def test_clear_new_ids(self, tmp_dir):
-        """clear_new_ids 清空 new_ids 但保留 fetched_ids"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        tracker = DedupTracker(data_file)
-
-        tracker.mark_as_fetched("https://example.com", "标题")
-        assert len(tracker.new_ids) == 1
-
-        tracker.clear_new_ids()
-        assert len(tracker.new_ids) == 0
-        assert len(tracker.fetched_ids) == 1
-
-
-# =========================================================================
-# 自动清理测试
-# =========================================================================
-
-class TestDedupTrackerCleanup:
-    """DedupTracker 超过上限自动清理测试"""
-
-    def test_no_cleanup_when_under_max(self, tmp_dir, monkeypatch):
-        """未达到上限时不触发清理"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        monkeypatch.setattr(DedupTracker, 'MAX_RECORDS', 5)
-
-        tracker = DedupTracker(data_file)
-        for i in range(2):
-            tracker.mark_as_fetched(f"https://example.com/{i}", f"T{i}")
-        tracker.save()
-
-        with open(data_file) as f:
-            lines = [l.strip() for l in f if l.strip()]
-        assert len(lines) == 2
-
-    def test_no_cleanup_at_exact_max(self, tmp_dir, monkeypatch):
-        """恰好等于上限时不触发清理"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        monkeypatch.setattr(DedupTracker, 'MAX_RECORDS', 3)
-
-        tracker = DedupTracker(data_file)
-        for i in range(3):
-            tracker.mark_as_fetched(f"https://example.com/{i}")
-        tracker.save()
-
-        with open(data_file) as f:
-            lines = [l.strip() for l in f if l.strip()]
-        assert len(lines) == 3
-
-    def test_cleanup_when_exceeds_max(self, tmp_dir, monkeypatch):
-        """超过上限时自动清理，保留最新的记录"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        monkeypatch.setattr(DedupTracker, 'MAX_RECORDS', 5)
-
-        # 预先写入 5 条旧记录
-        with open(data_file, 'w') as f:
-            for i in range(5):
-                f.write(f"old_{i}\n")
-
-        tracker = DedupTracker(data_file)
-        assert len(tracker.fetched_ids) == 5
-
-        # 新增 2 篇 → 2 条新哈希，总数 7 > 5，应触发清理
-        for i in range(2):
-            tracker.mark_as_fetched(f"https://example.com/new_{i}", f"N{i}")
-        tracker.save()
-
-        with open(data_file) as f:
-            lines = [l.strip() for l in f if l.strip()]
-        assert len(lines) == 5
-        assert "old_0" not in lines
-        assert "old_1" not in lines
-        assert "old_3" in lines
-        assert "old_4" in lines
-
-        assert len(tracker.fetched_ids) == 5
-        assert "old_0" not in tracker.fetched_ids
-        assert "old_4" in tracker.fetched_ids
-
-    def test_cleanup_keeps_newest_in_order(self, tmp_dir, monkeypatch):
-        """清理后文件中记录保持原有顺序（最新记录在末尾）"""
-        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
-        monkeypatch.setattr(DedupTracker, 'MAX_RECORDS', 3)
-
-        with open(data_file, 'w') as f:
-            f.write("aaa\nbbb\nccc\n")
-
-        tracker = DedupTracker(data_file)
-        tracker.mark_as_fetched("https://example.com/x", "X")
-        tracker.save()
-
-        with open(data_file) as f:
-            lines = [l.strip() for l in f if l.strip()]
-
-        # 追加后为 [aaa, bbb, ccc, url_hash_X] (4 条)，
-        # 保留末尾 3 条：bbb, ccc, url_hash_X
-        assert len(lines) == 3
-        assert lines[0] == "bbb"
-        assert "aaa" not in lines
+
+def test_empty_snapshot_preserves_previous_ids(tmp_dir):
+    tracker = DedupTracker(os.path.join(tmp_dir, "fetched_urls.txt"))
+    source_key = "rss:feed-a"
+    tracker.stage_source_snapshot(source_key, [url(1)])
+    tracker.save()
+    tracker.stage_source_snapshot(source_key, [])
+    tracker.save()
+
+    assert tracker.is_fetched(url(1), source_key)
+
+
+def test_save_and_reload_preserves_source_isolation(tmp_dir):
+    data_file = os.path.join(tmp_dir, "fetched_urls.txt")
+    tracker = DedupTracker(data_file)
+    tracker.stage_source_snapshot("rss:feed-a", [url(1)])
+    tracker.stage_source_snapshot("mail:box", [url(1), url(2)])
+    tracker.save()
+
+    lines = [line.strip() for line in open(data_file, encoding="utf-8") if line.strip()]
+    assert all("\t" in line for line in lines)
+
+    reloaded = DedupTracker(data_file)
+    assert reloaded.is_fetched(url(1), "rss:feed-a")
+    assert reloaded.is_fetched(url(2), "mail:box")
+    assert not reloaded.is_fetched(url(2), "rss:feed-a")
+
+
+def test_empty_save_does_not_create_file(tmp_dir):
+    data_file = os.path.join(tmp_dir, "fetched_urls.txt")
+    DedupTracker(data_file).save()
+    assert not os.path.exists(data_file)
+
+
+def test_clear_removes_all_source_snapshots(tmp_dir):
+    data_file = os.path.join(tmp_dir, "fetched_urls.txt")
+    tracker = DedupTracker(data_file)
+    tracker.stage_source_snapshot("rss:feed-a", [url(1)])
+    tracker.save()
+    tracker.clear()
+
+    assert not tracker.is_fetched(url(1), "rss:feed-a")
+    assert tracker.fetched_ids == set()
+
+
+def test_concurrent_mark_and_save_is_safe(tmp_dir):
+    tracker = DedupTracker(os.path.join(tmp_dir, "fetched_urls.txt"))
+
+    def worker(number):
+        tracker.mark_as_fetched(url(number), "rss:feed-a")
+        assert tracker.is_fetched(url(number), "rss:feed-a")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        list(executor.map(worker, range(100)))
+    tracker.save()
+
+    assert tracker.get_stats()["total_fetched"] == 100
+
+
+class TestFetcherDedupEnabledProperty:
+    def test_default_dedup_enabled(self):
+        assert BaseFetcher.dedup_enabled is True
+        assert RSSFetcher.dedup_enabled is True
+
+    def test_disabled_dedup_fetchers(self):
+        assert WeatherFetcher.dedup_enabled is False
+        assert TrendingFetcher.dedup_enabled is False
+        assert WebFetcher.dedup_enabled is False
+
+
+class TestProcessResultsWithDedupToggle:
+    @patch("src.main.ContentProcessor")
+    def test_process_results_skips_mark_when_dedup_disabled(self, mock_cp_cls):
+        source = ContentSource(type="weather", src="北京")
+        article = Article(
+            title="北京天气",
+            content="北京天气预报正文内容，长度足够且有效。",
+            url="https://example.com/weather",
+        )
+        result = FetchResult(source=source, articles=[article], success=True)
+        mock_processor = MagicMock()
+        mock_processor.process.side_effect = lambda a: a
+        mock_cp_cls.return_value = mock_processor
+
+        tracker = MagicMock()
+        tracker.is_fetched.return_value = True
+        out = process_results([result], tracker)
+
+        assert len(out[0].articles) == 1
+        tracker.is_fetched.assert_not_called()
+        tracker.mark_as_fetched.assert_not_called()
+
+
+class TestFreshStartAndSnapshotCandidates:
+    @patch("src.main.load_config")
+    @patch("src.main.DedupTracker")
+    @patch("src.main.get_fetcher")
+    def test_fresh_start_stages_all_candidates(
+        self, mock_get_fetcher, mock_tracker_cls, mock_load_config
+    ):
+        source = ContentSource(type="rss", src="https://example.com/rss")
+        mock_config = MagicMock(body=[source])
+        mock_load_config.return_value = mock_config
+        mock_tracker = MagicMock()
+        mock_tracker_cls.return_value = mock_tracker
+
+        fetcher = MagicMock(dedup_enabled=True, supports_two_phase=True)
+        fetcher.fetch_list.return_value = [
+            {"url": "https://example.com/1"},
+            {"url": "https://example.com/2"},
+        ]
+        mock_get_fetcher.return_value = fetcher
+
+        main(["--fresh-start"])
+
+        mock_tracker.clear.assert_called_once()
+        mock_tracker.stage_source_snapshot.assert_called_once_with(
+            mock_tracker.make_source_key.return_value,
+            ["https://example.com/1", "https://example.com/2"],
+        )
+        mock_tracker.save.assert_called_once()
+        fetcher.fetch_items.assert_not_called()
+
+    @patch("src.main.load_config")
+    @patch("src.main.DedupTracker")
+    @patch("src.main.get_fetcher")
+    @patch("src.main.process_results")
+    @patch("src.main.has_new_content")
+    def test_limit_does_not_remove_candidates_from_snapshot(
+        self,
+        mock_has_new,
+        mock_process,
+        mock_get_fetcher,
+        mock_tracker_cls,
+        mock_load_config,
+    ):
+        source = ContentSource(type="rss", src="https://example.com/rss")
+        mock_config = MagicMock(body=[source], limit=2)
+        mock_load_config.return_value = mock_config
+        mock_tracker = MagicMock()
+        mock_tracker.is_fetched.return_value = False
+        mock_tracker_cls.return_value = mock_tracker
+
+        candidates = [{"url": f"https://example.com/{i}"} for i in range(4)]
+        fetcher = MagicMock(dedup_enabled=True, supports_two_phase=True)
+        fetcher.get_limit.return_value = 2
+        fetcher.fetch_list.return_value = candidates
+        fetcher.fetch_items.return_value = FetchResult(
+            source=source, articles=[], success=True
+        )
+        mock_get_fetcher.return_value = fetcher
+        mock_process.return_value = []
+        mock_has_new.return_value = False
+
+        main([])
+
+        fetcher.fetch_items.assert_called_once_with(candidates[:2])
+        mock_tracker.stage_source_snapshot.assert_called_once_with(
+            mock_tracker.make_source_key.return_value,
+            [candidate["url"] for candidate in candidates],
+        )
+        mock_tracker.mark_as_fetched.assert_not_called()
+        mock_tracker.save.assert_called_once()

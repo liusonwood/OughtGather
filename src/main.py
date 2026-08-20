@@ -105,6 +105,7 @@ def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[F
     for result in results:
         short_src = truncate_url(result.source.src, 40)
         prefix = f"{result.source.type} | {short_src}"
+        source_key = tracker.make_source_key(result.source)
 
         if not result.success:
             logger.warning(f"[{prefix}] 对应内容源之前抓取失败，已跳过去重处理")
@@ -120,7 +121,7 @@ def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[F
         skipped_dedup = 0
 
         for article in result.articles:
-            if dedup_enabled and tracker.is_fetched(article.url):
+            if dedup_enabled and tracker.is_fetched(article.url, source_key):
                 logger.debug(f"[{prefix}] 跳过已抓取文章: {article.title}")
                 skipped_dedup += 1
                 continue
@@ -145,7 +146,7 @@ def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[F
 
             # 仅在启用去重且正文有效时标记去重
             if dedup_enabled:
-                tracker.mark_as_fetched(article.url)
+                tracker.mark_as_fetched(article.url, source_key)
             new_articles.append(article)
 
         # 更新结果
@@ -215,27 +216,25 @@ def main(argv=None):
                     elif fetcher.supports_two_phase:
                         candidates = fetcher.fetch_list()
                         if candidates:
-                            marked_count = 0
-                            for c in candidates:
-                                if c.get("url"):
-                                    tracker.mark_as_fetched(c["url"])
-                                    marked_count += 1
+                            urls = [c.get("url") for c in candidates if c.get("url")]
+                            tracker.stage_source_snapshot(
+                                tracker.make_source_key(source), urls
+                            )
                             logger.info(
                                 f"[Fresh Start 两阶段] {source.type} | {truncate_url(source.src, 40)}: "
-                                f"标记 {marked_count} 条候选 URL"
+                                f"标记 {len(urls)} 条候选 URL"
                             )
                         res = FetchResult(source=source, articles=[], success=True)
                     else:
                         res = fetcher.fetch_with_retry()
                         if res.success and res.articles:
-                            marked_count = 0
-                            for article in res.articles:
-                                if article.url:
-                                    tracker.mark_as_fetched(article.url)
-                                    marked_count += 1
+                            urls = [article.url for article in res.articles if article.url]
+                            tracker.stage_source_snapshot(
+                                tracker.make_source_key(source), urls
+                            )
                             logger.info(
                                 f"[Fresh Start 单阶段] {source.type} | {truncate_url(source.src, 40)}: "
-                                f"标记 {marked_count} 条文章 URL"
+                                f"标记 {len(urls)} 条文章 URL"
                             )
                             res.articles = []
                     fetcher.close()
@@ -284,6 +283,7 @@ def main(argv=None):
             fetcher = None
             try:
                 fetcher = get_fetcher(source, global_limit=config.limit)
+                snapshot_staged = False
 
                 if fetcher.supports_two_phase:
                     candidates = fetcher.fetch_list()
@@ -293,26 +293,29 @@ def main(argv=None):
                         )
                         res = fetcher.fetch_with_retry()
                     else:
+                        source_key = tracker.make_source_key(source)
+                        if fetcher.dedup_enabled and candidates:
+                            tracker.stage_source_snapshot(
+                                source_key, [c.get("url") for c in candidates]
+                            )
+                            snapshot_staged = True
                         if fetcher.dedup_enabled:
                             new_candidates = [
                                 c for c in candidates
-                                if c.get("url") and not tracker.is_fetched(c["url"])
+                                if c.get("url") and not (
+                                    tracker.is_fetched(c["url"], source_key)
+                                )
                             ]
                             limit = fetcher.get_limit()
                             to_fetch = new_candidates[:limit]
                             limit_skipped = new_candidates[limit:]
-
-                            # 核心要点：将限额截断丢弃的候选 URL 立刻标记去重，防止循环重复
-                            for c in limit_skipped:
-                                if c.get("url"):
-                                    tracker.mark_as_fetched(c["url"])
 
                             skipped_dedup = len(candidates) - len(new_candidates)
                             logger.info(
                                 f"[两阶段] {source.type} | {truncate_url(source.src, 40)}: "
                                 f"{len(to_fetch)}/{len(candidates)} 篇待抓取"
                                 + (f"，跳过已抓取 {skipped_dedup} 篇" if skipped_dedup else "")
-                                + (f"，自动标记超额弃用 {len(limit_skipped)} 篇" if limit_skipped else "")
+                                + (f"，本次限额未抓取 {len(limit_skipped)} 篇" if limit_skipped else "")
                             )
                             res = fetcher.fetch_items(to_fetch)
                         else:
@@ -325,6 +328,17 @@ def main(argv=None):
                             res = fetcher.fetch_items(to_fetch)
                 else:
                     res = fetcher.fetch_with_retry()
+
+                if (
+                    fetcher.dedup_enabled
+                    and not snapshot_staged
+                    and res.success
+                    and res.articles
+                ):
+                    tracker.stage_source_snapshot(
+                        tracker.make_source_key(source),
+                        [article.url for article in res.articles],
+                    )
 
                 fetcher.close()
                 fetcher = None
