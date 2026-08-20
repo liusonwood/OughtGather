@@ -130,7 +130,9 @@ class TestProcessResultsValidContent:
         assert len(out) == 1
         assert len(out[0].articles) == 1
         assert out[0].articles[0].title == "有效文章"
-        tracker.mark_as_fetched.assert_called_once_with(valid.url)
+        tracker.mark_as_fetched.assert_called_once_with(
+            valid.url, tracker.make_source_key.return_value
+        )
 
     @patch("src.main.ContentProcessor")
     def test_empty_article_not_marked_not_included(self, mock_cp_cls):
