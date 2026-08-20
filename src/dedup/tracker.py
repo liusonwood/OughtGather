@@ -26,6 +26,7 @@ class DedupTracker:
         self.logger = get_logger()
         self.fetched_ids: Set[str] = set()
         self.new_ids: Set[str] = set()
+        self._session_new_ids: Set[str] = set()
         self._lock = threading.Lock()
 
         # 加载已有记录
@@ -70,6 +71,7 @@ class DedupTracker:
             if url_hash not in self.fetched_ids:
                 self.fetched_ids.add(url_hash)
                 self.new_ids.add(url_hash)
+                self._session_new_ids.add(url_hash)
                 self.logger.debug(f"Marked as fetched: url={url}, hash={url_hash}")
 
     def save(self):
@@ -105,6 +107,7 @@ class DedupTracker:
         with self._lock:
             self.fetched_ids.clear()
             self.new_ids.clear()
+            self._session_new_ids.clear()
             if os.path.exists(self.data_file):
                 try:
                     with open(self.data_file, 'w', encoding='utf-8') as f:
@@ -150,11 +153,12 @@ class DedupTracker:
         with self._lock:
             return {
                 "total_fetched": len(self.fetched_ids),
-                "new_fetched": len(self.new_ids)
+                "new_fetched": len(self._session_new_ids)
             }
 
     def clear_new_ids(self):
         """清除新记录标记"""
         with self._lock:
             self.new_ids.clear()
+            self._session_new_ids.clear()
 
