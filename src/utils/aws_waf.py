@@ -131,9 +131,10 @@ def extract_challenge_context(html: str, target_url: str) -> Optional[WafContext
     )
 
 
-def build_telemetry(domain: str, user_agent: str) -> dict:
+def build_telemetry(domain: str, user_agent: str, target_url: str = "") -> dict:
     """构造用于 WAF 校验的浏览器指纹对象"""
     now_ms = int(time.time() * 1000)
+    loc = target_url or f"https://{domain}/"
     return {
         "metrics": {
             "fp2": 3,
@@ -156,9 +157,9 @@ def build_telemetry(domain: str, user_agent: str) -> dict:
         "plugins": [],
         "dupedPlugins": "unknown||1920-1080-1040-24-*-*-*",
         "screenInfo": "1920-1080-1040-24-*-*-*",
-        "referrer": "",
+        "referrer": f"https://{domain}/",
         "userAgent": user_agent,
-        "location": f"https://{domain}/",
+        "location": loc,
         "webDriver": False,
         "capabilities": {
             "hasLiedLanguages": False,
@@ -324,7 +325,7 @@ def solve_aws_waf(
         challenge_input = challenge_obj.get("input", "")
 
         # 2. 生成 Telemetry Signal 与 CRC32 Checksum
-        telemetry = build_telemetry(domain, user_agent)
+        telemetry = build_telemetry(domain, user_agent, target_url=target_url)
         signal, checksum = encode_telemetry_signal(telemetry)
 
         # 3. 求解 Hashcash PoW
@@ -372,7 +373,9 @@ def solve_aws_waf(
 
         token = verify_resp.json().get("token")
         if token:
+            base_domain = domain.replace("www.", "")
             WafTokenCache.set(domain, token)
+            WafTokenCache.set(base_domain, token)
             logger.info(f"AWS WAF: Successfully obtained aws-waf-token for {domain}")
             return token
         else:

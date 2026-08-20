@@ -331,14 +331,22 @@ class BaseFetcher(ABC):
             default_headers.update(headers)
 
         domain = urlparse(url).netloc
-        cached_token = WafTokenCache.get(domain)
+        base_domain = domain.replace("www.", "")
+        cached_token = WafTokenCache.get(domain) or WafTokenCache.get(base_domain)
 
         if not hasattr(self, '_client') or self._client is None or self._client.is_closed:
             limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
             self._client = httpx.Client(timeout=timeout, follow_redirects=True, limits=limits)
 
         if cached_token:
+            cookie_val = f"aws-waf-token={cached_token}"
+            if "Cookie" in default_headers:
+                if "aws-waf-token" not in default_headers["Cookie"]:
+                    default_headers["Cookie"] += f"; {cookie_val}"
+            else:
+                default_headers["Cookie"] = cookie_val
             self._client.cookies.set("aws-waf-token", cached_token, domain=domain)
+            self._client.cookies.set("aws-waf-token", cached_token, domain=f".{base_domain}")
 
         response = self._client.request(
             method,
@@ -365,11 +373,25 @@ class BaseFetcher(ABC):
                 timeout=timeout,
             )
             if token:
+                cookie_val = f"aws-waf-token={token}"
+                retry_headers = dict(default_headers)
+                if "Cookie" in retry_headers:
+                    if "aws-waf-token" not in retry_headers["Cookie"]:
+                        retry_headers["Cookie"] += f"; {cookie_val}"
+                    else:
+                        retry_headers["Cookie"] = re.sub(
+                            r"aws-waf-token=[^;]+", cookie_val, retry_headers["Cookie"]
+                        )
+                else:
+                    retry_headers["Cookie"] = cookie_val
+
                 self._client.cookies.set("aws-waf-token", token, domain=domain)
+                self._client.cookies.set("aws-waf-token", token, domain=f".{base_domain}")
+
                 retry_resp = self._client.request(
                     method,
                     url,
-                    headers=default_headers,
+                    headers=retry_headers,
                     timeout=timeout,
                     json=json,
                     data=data,
@@ -380,6 +402,10 @@ class BaseFetcher(ABC):
                     self.logger.info(
                         f"AWS WAF challenge solved successfully for {url} ({retry_resp.status_code})"
                     )
+                    if raise_for_status:
+                        retry_resp.raise_for_status()
+                    return retry_resp
+                else:
                     response = retry_resp
 
         # 若仍被阻断（例如 Cloudflare 403），尝试 cloudscraper 降级
