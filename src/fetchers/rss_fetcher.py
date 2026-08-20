@@ -207,6 +207,11 @@ class RSSFetcher(BaseFetcher):
         if full_text == "Y":
             # 抓取完整正文（使用 trafilatura）
             content, raw_html = self._fetch_full_text(link)
+            if not content:
+                self.logger.warning(
+                    f"Full text unavailable for {link}; falling back to RSS summary"
+                )
+                content = self._get_summary(entry)
             # 从原始 HTML 提取图片 URL（trafilatura 通常会剥离 <img>）
             body_images = self._extract_images(raw_html, base_url=link)
             # 额外从 og:image / twitter:image / <link rel="image_src"> 提取封面图，

@@ -42,7 +42,10 @@ class TestXPathListAutoFetcher:
 
         assert result.success is True
         assert len(result.articles) == 0
-        mock_request.assert_called_once_with("http://example.com/list")
+        mock_request.assert_called_once_with(
+            "http://example.com/list",
+            allow_browser_fallback=True,
+        )
 
     @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata")
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
