@@ -154,6 +154,65 @@ class TestBaseFetcherMakeRequest:
 
         mock_response.raise_for_status.assert_not_called()
 
+    def test_non_200_page_uses_browser_fallback(self):
+        fetcher = self._make_fetcher()
+        mock_response = MagicMock()
+        mock_response.status_code = 202
+        mock_response.request = MagicMock()
+        mock_response.content = b"challenge"
+        mock_client = MagicMock()
+        mock_client.is_closed = False
+        mock_client.request.return_value = mock_response
+        fetcher._client = mock_client
+
+        browser_response = MagicMock()
+        browser_response.status_code = 200
+        with patch.object(fetcher, "_make_browser_request", return_value=browser_response) as fallback:
+            result = fetcher._make_request(
+                "https://example.com",
+                allow_browser_fallback=True,
+            )
+
+        assert result is browser_response
+        fallback.assert_called_once()
+        mock_response.raise_for_status.assert_not_called()
+
+    def test_non_200_api_does_not_use_browser_fallback(self):
+        fetcher = self._make_fetcher()
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_client = MagicMock()
+        mock_client.is_closed = False
+        mock_client.request.return_value = mock_response
+        fetcher._client = mock_client
+
+        with patch.object(fetcher, "_make_browser_request") as fallback:
+            with pytest.raises(Exception, match="Unexpected HTTP status 403"):
+                fetcher._make_request("https://api.example.com")
+
+        fallback.assert_not_called()
+
+    def test_browser_failure_preserves_original_non_200_error(self):
+        fetcher = self._make_fetcher()
+        mock_response = MagicMock()
+        mock_response.status_code = 202
+        mock_response.request = MagicMock()
+        mock_client = MagicMock()
+        mock_client.is_closed = False
+        mock_client.request.return_value = mock_response
+        fetcher._client = mock_client
+
+        with patch.object(
+            fetcher,
+            "_make_browser_request",
+            side_effect=RuntimeError("challenge timeout"),
+        ):
+            with pytest.raises(Exception, match="Unexpected HTTP status 202"):
+                fetcher._make_request(
+                    "https://example.com",
+                    allow_browser_fallback=True,
+                )
+
 
 # =========================================================================
 # RSSFetcher 测试
@@ -303,6 +362,21 @@ class TestRSSFetcher:
         result = fetcher.fetch()
 
         assert result.articles[0].content == "<p>Desc</p>"
+
+    def test_full_text_failure_falls_back_to_rss_summary(self, rss_full_text_source):
+        fetcher = RSSFetcher(rss_full_text_source)
+        entry = _make_feedparser_dict({
+            "title": "Challenged article",
+            "link": "https://example.com/article",
+            "summary": "<p>RSS summary</p>",
+            "tags": [],
+        })
+
+        with patch.object(fetcher, "_fetch_full_text", return_value=("", "")):
+            article = fetcher._parse_entry(entry)
+
+        assert article is not None
+        assert article.content == "<p>RSS summary</p>"
 
     @patch("src.fetchers.rss_fetcher.feedparser.parse")
     def test_rss_global_limit(self, mock_parse):
@@ -978,4 +1052,3 @@ class TestFetcherPlugins:
         from src.fetchers.base import _registry
         if "dummy_custom" in _registry:
             del _registry["dummy_custom"]
-

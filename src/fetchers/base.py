@@ -122,11 +122,26 @@ class BaseFetcher(ABC):
         self.logger = get_logger()
         self._client = None
         self._scraper = None
+        self._playwright = None
+        self._browser = None
+        self._browser_context = None
 
-    def __del__(self):
+    def close(self):
+        """显式释放 HTTP 和 Playwright 资源；可安全重复调用。"""
         try:
             if hasattr(self, '_client') and self._client and not self._client.is_closed:
                 self._client.close()
+        except Exception:
+            pass
+        try:
+            self._close_browser()
+        except Exception:
+            pass
+
+    def __del__(self):
+        # 作为未显式 close() 时的最后兜底；主流程不依赖析构时机释放资源。
+        try:
+            self.close()
         except Exception:
             pass
 
@@ -249,6 +264,7 @@ class BaseFetcher(ABC):
         data: Optional[Any] = None,
         params: Optional[Dict[str, Any]] = None,
         raise_for_status: bool = True,
+        allow_browser_fallback: bool = False,
     ) -> httpx.Response:
         """
         发送 HTTP 请求。所有 fetcher 的网络访问都应走此方法，以便统一
@@ -263,6 +279,7 @@ class BaseFetcher(ABC):
             data: 表单或原始请求体
             params: URL 查询参数
             raise_for_status: 是否在 4xx/5xx 时抛出异常
+            allow_browser_fallback: 非 200 时是否使用 Playwright 获取渲染后的 HTML。
 
         Returns:
             httpx.Response
@@ -286,9 +303,138 @@ class BaseFetcher(ABC):
         )
         response.read()  # 确保读取响应体
 
+        # 只有明确标记的 HTML 页面请求才启用浏览器，避免 API/XML 请求
+        # 在遇到普通错误时启动 Chromium。
+        status_code = getattr(response, "status_code", None)
+        if allow_browser_fallback and isinstance(status_code, int) and status_code != 200:
+            try:
+                browser_response = self._make_browser_request(
+                    url=url,
+                    headers=default_headers,
+                    timeout=timeout,
+                )
+                if browser_response is not None:
+                    return browser_response
+            except Exception as browser_error:
+                self.logger.warning(
+                    f"Playwright fallback failed for {url} "
+                    f"(original status {status_code}): {browser_error}"
+                )
+
         if raise_for_status:
+            if isinstance(status_code, int) and status_code != 200:
+                # httpx 对 3xx/202 不会自动抛异常，但页面请求的契约是最终
+                # 必须为 200，因此所有非 200 都要保留为可诊断错误。
+                raise httpx.HTTPStatusError(
+                    f"Unexpected HTTP status {status_code}",
+                    request=response.request,
+                    response=response,
+                )
             response.raise_for_status()
         return response
+
+    def _make_browser_request(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        timeout: int = DEFAULT_TIMEOUT,
+    ) -> httpx.Response:
+        """使用复用的 Headless Chromium 执行页面 JavaScript 并返回 HTML。"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError as exc:
+            raise RuntimeError(
+                "Playwright is required for browser fallback; install the "
+                "'playwright' package and Chromium"
+            ) from exc
+
+        if self._browser is None:
+            self._playwright = sync_playwright().start()
+            self._browser = self._playwright.chromium.launch(headless=True)
+
+        browser_headers = {
+            key: value for key, value in (headers or {}).items()
+            if key.lower() not in {"host", "content-length", "connection", "user-agent"}
+        }
+        user_agent = next(
+            (value for key, value in (headers or {}).items()
+             if key.lower() == "user-agent"),
+            None,
+        )
+        # 每次请求创建 context，避免不同请求的 headers/cookies 互相污染；
+        # Chromium 进程本身仍在当前 fetcher 内复用。
+        self._browser_context = self._browser.new_context(
+            user_agent=user_agent,
+            extra_http_headers=browser_headers or None,
+        )
+        context = self._browser_context
+        try:
+            page = context.new_page()
+            document_statuses = []
+
+            def record_document_response(response):
+                if response.request.resource_type == "document":
+                    document_statuses.append(response.status)
+
+            page.on("response", record_document_response)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+                initial_status = document_statuses[-1] if document_statuses else None
+                if initial_status is None:
+                    raise RuntimeError("browser navigation returned no document response")
+                if not 200 <= initial_status < 300 and initial_status != 202:
+                    raise RuntimeError(f"browser navigation ended with HTTP {initial_status}")
+
+                final_status = initial_status
+                if initial_status == 202:
+                    deadline = time.monotonic() + timeout
+                    while (
+                        not 200 <= final_status < 300
+                        and time.monotonic() < deadline
+                    ):
+                        # 不等待 networkidle，避免长轮询/分析请求导致无谓超时；
+                        # 仅等待 202 挑战完成并跳转到 2xx。
+                        page.wait_for_timeout(250)
+                        final_status = document_statuses[-1] if document_statuses else None
+                if not 200 <= final_status < 300:
+                    raise RuntimeError(f"browser navigation ended with HTTP {final_status}")
+
+                html = page.content()
+                request = httpx.Request("GET", page.url or url, headers=headers or {})
+                return httpx.Response(
+                    status_code=final_status,
+                    headers={"content-type": "text/html; charset=utf-8"},
+                    content=html.encode("utf-8"),
+                    request=request,
+                )
+            finally:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+            self._browser_context = None
+
+    def _close_browser(self):
+        """关闭当前 fetcher 的 Playwright 资源。"""
+        context = self._browser_context
+        browser = self._browser
+        playwright = self._playwright
+        self._browser_context = None
+        self._browser = None
+        self._playwright = None
+
+        for resource in (context, browser, playwright):
+            if resource is None:
+                continue
+            try:
+                (resource.close if resource is not playwright else resource.stop)()
+            except Exception:
+                pass
 
     def _resolve_url(self, url: str, base_url: Optional[str] = None) -> str:
         """
@@ -469,7 +615,7 @@ class BaseFetcher(ABC):
             return "", ""
 
         try:
-            response = self._make_request(url)
+            response = self._make_request(url, allow_browser_fallback=True)
             raw_html = response.text
 
             # 使用 trafilatura 提取正文

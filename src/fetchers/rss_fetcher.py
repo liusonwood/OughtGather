@@ -207,8 +207,14 @@ class RSSFetcher(BaseFetcher):
         if full_text == "Y":
             # 抓取完整正文（使用 trafilatura）
             content, raw_html = self._fetch_full_text(link)
+            if not content:
+                self.logger.warning(
+                    f"Full text unavailable for {link}; falling back to RSS summary"
+                )
+                content = self._get_summary(entry)
+            image_html = raw_html or content
             # 从原始 HTML 提取图片 URL（trafilatura 通常会剥离 <img>）
-            body_images = self._extract_images(raw_html, base_url=link)
+            body_images = self._extract_images(image_html, base_url=link)
             # 额外从 og:image / twitter:image / <link rel="image_src"> 提取封面图，
             # 置于列表首位（SPA 类网站如 Scientific American 的 lead image
             # 可能不在 trafilatura 识别的正文区域内，依赖 meta 标签才能捕获）
