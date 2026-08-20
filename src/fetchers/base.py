@@ -165,10 +165,15 @@ class BaseFetcher(ABC):
 
     def get_limit(self) -> int:
         """
-        获取当前源的抓取限制条目数（优先取 metadata.limit，其次取全局 global_limit）。
+        获取当前源的抓取限制条目数（优先取 source.limit / metadata.limit，其次取全局 global_limit）。
         """
         metadata = self.source.metadata or {}
-        return int(metadata.get("limit", self.global_limit))
+        src_limit = getattr(self.source, "limit", None)
+        if src_limit is not None and str(src_limit).isdigit():
+            return int(src_limit)
+        if "limit" in metadata and metadata["limit"] is not None and str(metadata["limit"]).isdigit():
+            return int(metadata["limit"])
+        return int(self.global_limit)
 
     @abstractmethod
     def fetch(self) -> FetchResult:

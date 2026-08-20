@@ -189,10 +189,14 @@ def _parse_config(data: Dict[str, Any]) -> Config:
         except Exception as e:
             raise ValueError(f"Error parsing body[{idx}]: {e}")
 
+    raw_limit = data.get("limit")
+    if raw_limit is None:
+        raw_limit = data.get("global_limit", 15)
+
     return Config(
         title=title_config,
         body=sources,
-        limit=data.get("limit", 15),
+        limit=int(raw_limit),
         load_images=data.get("load_images", "Y")
     )
 
