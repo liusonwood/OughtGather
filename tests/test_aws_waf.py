@@ -270,9 +270,39 @@ class TestBaseFetcherIntegration:
 
         mock_requests = [resp_202, resp_200]
 
-        with patch("src.fetchers.base.solve_aws_waf", return_value="token_12345") as mock_solver, \
+        # 隔离真实网络请求：模拟 _curl_cffi_fallback 失败时触发 httpx 降级分支
+        with patch.object(fetcher, "_curl_cffi_fallback", return_value=None), \
+             patch("src.fetchers.base.solve_aws_waf", return_value="token_12345") as mock_solver, \
              patch.object(httpx.Client, "request", side_effect=lambda *args, **kwargs: mock_requests.pop(0)):
             resp = fetcher._make_request(source.src, browser=True)
             assert resp.status_code == 200
             assert b"Success Feed" in resp.content
+            mock_solver.assert_called_once()
+
+    def test_curl_cffi_fallback_and_waf_solve(self):
+        source = ContentSource(type="dummy", src="https://www.scientificamerican.com/feed/")
+        fetcher = DummyFetcher(source)
+
+        mock_202 = MagicMock()
+        mock_202.status_code = 202
+        mock_202.headers = {"x-amzn-waf-action": "challenge"}
+        mock_202.text = "<html>challenge</html>"
+        mock_202.url = source.src
+
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_200.headers = {}
+        mock_200.content = b"<html><body>Recovered Content</body></html>"
+        mock_200.text = "<html><body>Recovered Content</body></html>"
+        mock_200.url = source.src
+
+        mock_session = MagicMock()
+        mock_session.get.side_effect = [mock_202, mock_200]
+
+        with patch("curl_cffi.requests.Session", return_value=mock_session), \
+             patch("src.fetchers.base.solve_aws_waf", return_value="token_12345") as mock_solver:
+            res = fetcher._curl_cffi_fallback(source.src)
+            assert res is not None
+            assert res.status_code == 200
+            assert b"Recovered Content" in res.content
             mock_solver.assert_called_once()

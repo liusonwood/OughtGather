@@ -171,10 +171,16 @@ def _parse_config(data: Dict[str, Any]) -> Config:
     sources = []
     for idx, source_data in enumerate(data["body"]):
         try:
+            raw_priority = source_data.get("priority")
+            try:
+                priority = int(raw_priority) if raw_priority is not None and str(raw_priority).strip() != "" else 0
+            except (ValueError, TypeError):
+                priority = 0
+
             source = ContentSource(
                 type=source_data.get("type"),
                 src=source_data.get("src"),
-                priority=source_data.get("priority", 0),
+                priority=priority,
                 title=source_data.get("title"),
                 keep_link=source_data.get("keep_link", "Y"),
                 full_text=source_data.get("full_text", "N"),
@@ -189,10 +195,14 @@ def _parse_config(data: Dict[str, Any]) -> Config:
         except Exception as e:
             raise ValueError(f"Error parsing body[{idx}]: {e}")
 
+    raw_limit = data.get("limit")
+    if raw_limit is None:
+        raw_limit = data.get("global_limit", 15)
+
     return Config(
         title=title_config,
         body=sources,
-        limit=data.get("limit", 15),
+        limit=int(raw_limit),
         load_images=data.get("load_images", "Y")
     )
 
