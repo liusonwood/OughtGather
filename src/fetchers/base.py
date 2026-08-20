@@ -307,6 +307,10 @@ class BaseFetcher(ABC):
         # 在遇到普通错误时启动 Chromium。
         status_code = getattr(response, "status_code", None)
         if allow_browser_fallback and isinstance(status_code, int) and status_code != 200:
+            self.logger.info(
+                f"[Playwright] Triggering browser fallback for {url} "
+                f"after HTTP {status_code}"
+            )
             try:
                 browser_response = self._make_browser_request(
                     url=url,
@@ -349,8 +353,11 @@ class BaseFetcher(ABC):
             ) from exc
 
         if self._browser is None:
+            self.logger.info("[Playwright] Launching headless Chromium")
             self._playwright = sync_playwright().start()
             self._browser = self._playwright.chromium.launch(headless=True)
+        else:
+            self.logger.info("[Playwright] Reusing headless Chromium")
 
         browser_headers = {
             key: value for key, value in (headers or {}).items()
@@ -382,11 +389,17 @@ class BaseFetcher(ABC):
                 initial_status = document_statuses[-1] if document_statuses else None
                 if initial_status is None:
                     raise RuntimeError("browser navigation returned no document response")
+                self.logger.info(
+                    f"[Playwright] {url} initial document status: {initial_status}"
+                )
                 if not 200 <= initial_status < 300 and initial_status != 202:
                     raise RuntimeError(f"browser navigation ended with HTTP {initial_status}")
 
                 final_status = initial_status
                 if initial_status == 202:
+                    self.logger.info(
+                        f"[Playwright] Waiting for JavaScript challenge: {url}"
+                    )
                     deadline = time.monotonic() + timeout
                     while (
                         (not 200 <= final_status < 300 or final_status == 202)
@@ -398,6 +411,11 @@ class BaseFetcher(ABC):
                         final_status = document_statuses[-1] if document_statuses else None
                 if not 200 <= final_status < 300 or final_status == 202:
                     raise RuntimeError(f"browser navigation ended with HTTP {final_status}")
+
+                self.logger.info(
+                    f"[Playwright] Browser fallback succeeded for {url} "
+                    f"with final HTTP {final_status}"
+                )
 
                 html = page.content()
                 request = httpx.Request("GET", page.url or url, headers=headers or {})
