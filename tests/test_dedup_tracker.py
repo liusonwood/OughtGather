@@ -203,6 +203,19 @@ class TestDedupTrackerStats:
         assert stats["total_fetched"] == 2
         assert stats["new_fetched"] == 2
 
+    def test_get_stats_after_save(self, tmp_dir):
+        """save 后 get_stats 依然正确返回本次新增入库数"""
+        data_file = os.path.join(tmp_dir, "fetched_urls.txt")
+        tracker = DedupTracker(data_file)
+
+        tracker.mark_as_fetched("https://example.com/a", "A")
+        tracker.mark_as_fetched("https://example.com/b", "B")
+        tracker.save()
+
+        stats = tracker.get_stats()
+        assert stats["total_fetched"] == 2
+        assert stats["new_fetched"] == 2
+
     def test_get_stats_after_reload(self, tmp_dir):
         """重新加载后 new_fetched 为 0"""
         data_file = os.path.join(tmp_dir, "fetched_urls.txt")
