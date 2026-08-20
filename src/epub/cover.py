@@ -115,9 +115,7 @@ class CoverGenerator:
             Optional[Image.Image]: 图片对象
         """
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (compatible; OughtGather/1.0)"
-            }
+            headers = {"User-Agent": "OughtGather/1.0"}
 
             with httpx.Client(timeout=30, follow_redirects=True) as client:
                 response = client.get(url, headers=headers)

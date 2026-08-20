@@ -256,9 +256,9 @@ class EPUBGenerator:
                 spine.append(chapter)  # 添加到 spine（阅读顺序）
                 chapter_id += 1
 
-        # 1. 收集所有章节中唯一的图片 URL 及其 referer (article.url)
+        # 1. 收集所有章节中的唯一图片 URL
         self.logger.info("Gathering all unique image URLs from chapters...")
-        unique_images = {}  # image_src -> referer_url
+        unique_images = {}  # image_src -> page_url (用于解析相对路径)
         
         # 检查全局设置
         global_load_images = self.config.load_images == 'Y'
@@ -295,8 +295,8 @@ class EPUBGenerator:
             max_workers = min(len(unique_images), 25)
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_src = {
-                    executor.submit(self.image_processor.download_and_process, src, referer): src
-                    for src, referer in unique_images.items()
+                    executor.submit(self.image_processor.download_and_process, src, page_url): src
+                    for src, page_url in unique_images.items()
                 }
                 for future in concurrent.futures.as_completed(future_to_src):
                     src = future_to_src[future]

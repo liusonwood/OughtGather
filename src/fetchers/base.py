@@ -8,44 +8,11 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
-from urllib.parse import urlparse
-import json as json_lib
 import httpx
 import trafilatura
 
 from src.config import ContentSource
 from src.utils.logger import get_logger
-from src.utils.aws_waf import solve_aws_waf, WafTokenCache
-
-
-class _CompatResponse:
-    """cloudscraper（requests）响应的薄封装，接口与 fetcher 使用的 httpx.Response 对齐。"""
-
-    def __init__(
-        self,
-        content: bytes,
-        status_code: int,
-        text: str,
-        url: str = "",
-        headers: Optional[Dict[str, str]] = None,
-    ):
-        self.content = content
-        self.status_code = status_code
-        self.text = text
-        self.url = url
-        self.headers = headers or {}
-
-    def json(self):
-        return json_lib.loads(self.content)
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            request = httpx.Request("GET", str(self.url) or "https://invalid.local")
-            raise httpx.HTTPStatusError(
-                f"Client error '{self.status_code}' for url '{self.url}'",
-                request=request,
-                response=httpx.Response(self.status_code, request=request),
-            )
 
 
 @dataclass
@@ -270,31 +237,7 @@ class BaseFetcher(ABC):
         )
 
     DEFAULT_TIMEOUT = 10
-    DEFAULT_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/120.0.0.0"
-    }
-    # Chrome 122 文档导航头，仅用于页面类 GET（RSS/Web/XPath/Telegram/全文）
-    BROWSER_HEADERS = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        ),
-        "Accept": (
-            "text/html,application/xhtml+xml,application/xml;q=0.9,"
-            "image/avif,image/webp,image/apng,*/*;q=0.8,"
-            "application/signed-exchange;v=b3;q=0.7"
-        ),
-        "Accept-Language": "en-US,en;q=0.9",
-        "Upgrade-Insecure-Requests": "1",
-        "Cache-Control": "max-age=0",
-        "Sec-Ch-Ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-    }
+    DEFAULT_HEADERS = {"User-Agent": "OughtGather/1.0"}
 
     def _make_request(
         self,
@@ -306,12 +249,10 @@ class BaseFetcher(ABC):
         data: Optional[Any] = None,
         params: Optional[Dict[str, Any]] = None,
         raise_for_status: bool = True,
-        browser: bool = False,
-        reject_html: bool = False,
     ) -> httpx.Response:
         """
         发送 HTTP 请求。所有 fetcher 的网络访问都应走此方法，以便统一
-        User-Agent、连接复用与后续反爬策略。
+        User-Agent 和连接复用。
 
         Args:
             url: 请求 URL
@@ -322,36 +263,17 @@ class BaseFetcher(ABC):
             data: 表单或原始请求体
             params: URL 查询参数
             raise_for_status: 是否在 4xx/5xx 时抛出异常
-            browser: 为 True 时使用完整 Chrome 客户端提示头；GET 遇到
-                403/WAF 挑战（或 reject_html 时收到 HTML）再回退 cloudscraper。
-                仅页面抓取应开启，JSON API 不要开。
-            reject_html: RSS/Atom 等期望 XML 时设为 True。200 却拿到 HTML
-                错误页时同样走 cloudscraper，避免 feedparser 报 mismatched tag。
 
         Returns:
-            httpx.Response 或与之接口兼容的响应（cloudscraper 回退路径）
+            httpx.Response
         """
-        default_headers = dict(self.BROWSER_HEADERS if browser else self.DEFAULT_HEADERS)
+        default_headers = dict(self.DEFAULT_HEADERS)
         if headers:
             default_headers.update(headers)
-
-        domain = urlparse(url).netloc
-        base_domain = domain.replace("www.", "")
-        cached_token = WafTokenCache.get(domain) or WafTokenCache.get(base_domain)
 
         if not hasattr(self, '_client') or self._client is None or self._client.is_closed:
             limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
             self._client = httpx.Client(timeout=timeout, follow_redirects=True, limits=limits)
-
-        if cached_token:
-            cookie_val = f"aws-waf-token={cached_token}"
-            if "Cookie" in default_headers:
-                if "aws-waf-token" not in default_headers["Cookie"]:
-                    default_headers["Cookie"] += f"; {cookie_val}"
-            else:
-                default_headers["Cookie"] = cookie_val
-            self._client.cookies.set("aws-waf-token", cached_token, domain=domain)
-            self._client.cookies.set("aws-waf-token", cached_token, domain=f".{base_domain}")
 
         response = self._client.request(
             method,
@@ -364,272 +286,9 @@ class BaseFetcher(ABC):
         )
         response.read()  # 确保读取响应体
 
-        # 若收到 WAF 挑战（HTTP 202）或 403 阻断，优先使用 curl_cffi（Chrome 真实 TLS 指纹）绕过
-        if browser and method.upper() == "GET" and (
-            self._is_waf_challenge(response) or self._should_try_cloudscraper(response, reject_html=reject_html)
-        ):
-            cffi_fallback = self._curl_cffi_fallback(
-                url, headers=default_headers, timeout=timeout, params=params
-            )
-            if (
-                cffi_fallback is not None
-                and cffi_fallback.status_code < 400
-                and not self._is_waf_challenge(cffi_fallback)
-                and not (reject_html and self._looks_like_html(cffi_fallback))
-            ):
-                return cffi_fallback
-
-        # 若 curl_cffi 不可用或未恢复，且收到 AWS WAF 挑战，尝试基于 httpx 的算法求解
-        if browser and method.upper() == "GET" and self._is_waf_challenge(response):
-            reason = self._block_reason(response)
-            self.logger.warning(
-                f"{reason} for {url}, attempting AWS WAF challenge solver"
-            )
-            token = solve_aws_waf(
-                self._client,
-                url,
-                response.text,
-                user_agent=default_headers.get("User-Agent", ""),
-                timeout=timeout,
-            )
-            if token:
-                cookie_val = f"aws-waf-token={token}"
-                retry_headers = dict(default_headers)
-                if "Cookie" in retry_headers:
-                    if "aws-waf-token" not in retry_headers["Cookie"]:
-                        retry_headers["Cookie"] += f"; {cookie_val}"
-                    else:
-                        retry_headers["Cookie"] = re.sub(
-                            r"aws-waf-token=[^;]+", cookie_val, retry_headers["Cookie"]
-                        )
-                else:
-                    retry_headers["Cookie"] = cookie_val
-
-                self._client.cookies.set("aws-waf-token", token, domain=domain)
-                self._client.cookies.set("aws-waf-token", token, domain=f".{base_domain}")
-
-                retry_resp = self._client.request(
-                    method,
-                    url,
-                    headers=retry_headers,
-                    timeout=timeout,
-                    json=json,
-                    data=data,
-                    params=params,
-                )
-                retry_resp.read()
-                if not self._is_waf_challenge(retry_resp):
-                    self.logger.info(
-                        f"AWS WAF challenge solved successfully for {url} ({retry_resp.status_code})"
-                    )
-                    if raise_for_status:
-                        retry_resp.raise_for_status()
-                    return retry_resp
-                else:
-                    response = retry_resp
-
-        # 若仍被阻断（例如 Cloudflare 403），尝试 cloudscraper 降级
-        if browser and method.upper() == "GET" and self._should_try_cloudscraper(
-            response, reject_html=reject_html
-        ):
-            reason = self._block_reason(response)
-            self.logger.warning(
-                f"{reason} for {url}, retrying with cloudscraper"
-            )
-            fallback = self._cloudscraper_fallback(
-                url, headers=default_headers, timeout=timeout, params=params
-            )
-            if (
-                fallback is not None
-                and fallback.status_code < 400
-                and not self._should_try_cloudscraper(fallback, reject_html=reject_html)
-            ):
-                return fallback
-            if fallback is not None:
-                response = fallback
-
-        if browser and self._is_waf_challenge(response):
-            raise RuntimeError(f"{self._block_reason(response)} for {url}")
-        if reject_html and self._looks_like_html(response):
-            raise RuntimeError(
-                f"Expected feed XML but received HTML (HTTP {response.status_code}) for {url}"
-            )
-
         if raise_for_status:
             response.raise_for_status()
         return response
-
-    def _curl_cffi_fallback(
-        self,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        timeout: int = DEFAULT_TIMEOUT,
-        params: Optional[Dict[str, Any]] = None,
-    ) -> Optional[_CompatResponse]:
-        """使用 curl_cffi 模拟真实浏览器 TLS 协议指纹（Chrome 120），突破严苛的 WAF 拦截。"""
-        try:
-            from curl_cffi import requests as cffi_requests
-        except ImportError:
-            return None
-
-        try:
-            domain = urlparse(url).netloc
-            base_domain = domain.replace("www.", "")
-            cached_token = WafTokenCache.get(domain) or WafTokenCache.get(base_domain)
-
-            s = cffi_requests.Session(impersonate="chrome120")
-            # 过滤静态伪造的客户端头，由 curl_cffi 自动生成与底层 TLS 严格匹配的指纹请求头
-            req_headers = {}
-            if headers:
-                for k, v in headers.items():
-                    if k.lower() not in (
-                        "user-agent",
-                        "sec-ch-ua",
-                        "sec-ch-ua-mobile",
-                        "sec-ch-ua-platform",
-                    ):
-                        req_headers[k] = v
-
-            if cached_token:
-                cookie_val = f"aws-waf-token={cached_token}"
-                if "Cookie" in req_headers:
-                    if "aws-waf-token" not in req_headers["Cookie"]:
-                        req_headers["Cookie"] += f"; {cookie_val}"
-                else:
-                    req_headers["Cookie"] = cookie_val
-                s.cookies.set("aws-waf-token", cached_token, domain=domain)
-                s.cookies.set("aws-waf-token", cached_token, domain=f".{base_domain}")
-
-            resp = s.get(url, headers=req_headers, timeout=timeout, params=params)
-
-            # 如果 curl_cffi 也收到了 202 挑战，用该 session 执行算法求解
-            if resp.status_code == 202 or (
-                resp.headers.get("x-amzn-waf-action", "").lower() in ("challenge", "captcha")
-            ):
-                token = solve_aws_waf(
-                    s,
-                    url,
-                    resp.text,
-                    user_agent=headers.get("User-Agent", "") if headers else "",
-                    timeout=timeout,
-                )
-                if token:
-                    cookie_val = f"aws-waf-token={token}"
-                    if "Cookie" in req_headers:
-                        req_headers["Cookie"] = re.sub(
-                            r"aws-waf-token=[^;]+", cookie_val, req_headers["Cookie"]
-                        )
-                    else:
-                        req_headers["Cookie"] = cookie_val
-                    s.cookies.set("aws-waf-token", token, domain=domain)
-                    s.cookies.set("aws-waf-token", token, domain=f".{base_domain}")
-                    resp = s.get(url, headers=req_headers, timeout=timeout, params=params)
-
-            if resp.status_code < 400 and not (
-                resp.status_code == 202
-                or resp.headers.get("x-amzn-waf-action", "").lower() in ("challenge", "captcha")
-            ):
-                self.logger.info(f"curl_cffi (browser TLS) recovered {url} ({resp.status_code})")
-                return _CompatResponse(
-                    content=resp.content,
-                    status_code=resp.status_code,
-                    text=resp.text,
-                    url=str(resp.url),
-                    headers=dict(resp.headers),
-                )
-            return None
-        except Exception as e:
-            self.logger.debug(f"curl_cffi fallback failed for {url}: {e}")
-            return None
-
-    def _cloudscraper_fallback(
-        self,
-        url: str,
-        headers: Optional[Dict[str, str]] = None,
-        timeout: int = DEFAULT_TIMEOUT,
-        params: Optional[Dict[str, Any]] = None,
-    ) -> Optional[_CompatResponse]:
-        """httpx 收到 403 后，用 cloudscraper 再请求一次页面。"""
-        try:
-            import cloudscraper
-        except ImportError:
-            self.logger.warning(
-                "cloudscraper is not installed; cannot retry after 403"
-            )
-            return None
-
-        try:
-            if self._scraper is None:
-                self._scraper = cloudscraper.create_scraper()
-            resp = self._scraper.get(
-                url, headers=headers, timeout=timeout, params=params
-            )
-            if resp.status_code < 400 and not self._is_waf_challenge(resp):
-                self.logger.info(f"cloudscraper recovered {url} ({resp.status_code})")
-            else:
-                self.logger.warning(
-                    f"cloudscraper still got HTTP {resp.status_code} for {url}"
-                )
-            return _CompatResponse(
-                content=resp.content,
-                status_code=resp.status_code,
-                text=resp.text,
-                url=str(resp.url),
-                headers=dict(resp.headers),
-            )
-        except Exception as e:
-            self.logger.warning(f"cloudscraper fallback failed for {url}: {e}")
-            return None
-
-    @staticmethod
-    def _header(response, name: str) -> str:
-        headers = getattr(response, "headers", None) or {}
-        try:
-            return headers.get(name) or headers.get(name.lower()) or ""
-        except Exception:
-            return ""
-
-    def _looks_like_html(self, response) -> bool:
-        content_type = self._header(response, "content-type").lower()
-        if "text/html" in content_type and "xml" not in content_type:
-            return True
-        content = getattr(response, "content", b"") or b""
-        head = content[:512].lstrip().lower()
-        return head.startswith(b"<!doctype html") or head.startswith(b"<html")
-
-    def _is_waf_challenge(self, response) -> bool:
-        status = getattr(response, "status_code", 0)
-        action = self._header(response, "x-amzn-waf-action").lower()
-        if status == 202 or action in ("challenge", "captcha"):
-            return True
-        content = (getattr(response, "content", b"") or b"")[:2048].lower()
-        return (
-            b"awswafintegration" in content
-            or b"aws-waf-token" in content
-            or b"cdn-cgi/challenge-platform" in content
-        )
-
-    def _should_try_cloudscraper(self, response, reject_html: bool = False) -> bool:
-        status = getattr(response, "status_code", 0)
-        if status in (403, 202) or self._is_waf_challenge(response):
-            return True
-        if reject_html and self._looks_like_html(response):
-            return True
-        return False
-
-    def _block_reason(self, response) -> str:
-        status = getattr(response, "status_code", 0)
-        action = self._header(response, "x-amzn-waf-action")
-        if action:
-            return f"WAF challenge (HTTP {status}, x-amzn-waf-action={action})"
-        if status == 202:
-            return f"WAF challenge (HTTP {status})"
-        if status == 403:
-            return f"HTTP {status}"
-        if self._looks_like_html(response):
-            return f"HTML challenge page (HTTP {status})"
-        return f"HTTP {status}"
-
 
     def _resolve_url(self, url: str, base_url: Optional[str] = None) -> str:
         """
@@ -810,8 +469,7 @@ class BaseFetcher(ABC):
             return "", ""
 
         try:
-            # 下载网页（页面抓取：浏览器头，403 时 cloudscraper）
-            response = self._make_request(url, browser=True)
+            response = self._make_request(url)
             raw_html = response.text
 
             # 使用 trafilatura 提取正文

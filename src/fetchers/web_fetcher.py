@@ -36,7 +36,7 @@ class WebFetcher(BaseFetcher):
 
         try:
             # 下载网页
-            response = self._make_request(self.source.src, browser=True)
+            response = self._make_request(self.source.src)
             html = response.text
 
             # 提取标题

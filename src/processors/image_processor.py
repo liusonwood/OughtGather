@@ -47,7 +47,7 @@ class ImageProcessor:
 
         Args:
             url: 图片 URL
-            base_url: 基础 URL（用于处理相对路径和作为 Referer）
+            base_url: 基础 URL（用于处理相对路径）
 
         Returns:
             Tuple[str, bytes]: (文件名, 图片数据)
@@ -58,8 +58,7 @@ class ImageProcessor:
 
             # 下载图片
             self.logger.debug(f"Downloading image: {full_url}")
-            # 将 base_url 传给下载器作为 Referer
-            response = self._download_image(full_url, referer=base_url)
+            response = self._download_image(full_url)
 
             if not response:
                 return None
@@ -100,26 +99,18 @@ class ImageProcessor:
             
         return urljoin(base_url, url)
 
-    def _download_image(self, url: str, referer: Optional[str] = None) -> Optional[bytes]:
+    def _download_image(self, url: str) -> Optional[bytes]:
         """
         下载图片
 
         Args:
             url: 图片 URL
-            referer: 引用页 URL（用于绕过防盗链）
-
         Returns:
             Optional[bytes]: 图片数据
         """
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
-            if referer:
-                headers["Referer"] = referer
-
             with httpx.Client(timeout=8, follow_redirects=True) as client:
-                response = client.get(url, headers=headers)
+                response = client.get(url, headers={"User-Agent": "OughtGather/1.0"})
                 response.raise_for_status()
                 return response.content
 

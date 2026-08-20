@@ -69,9 +69,7 @@ class TwitterFetcher(BaseFetcher):
         try:
             self.logger.info(f"正在尝试使用 FxTwitter API 抓取账号 [@{username}] 的最新推文...")
             api_url = f"https://api.fxtwitter.com/2/profile/{username}/statuses"
-            # 使用标准的最新 Chrome User-Agent
             api_headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "application/json"
             }
             response = self._make_request(api_url, headers=api_headers, timeout=15)

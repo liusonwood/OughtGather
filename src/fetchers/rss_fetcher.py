@@ -263,10 +263,7 @@ class RSSFetcher(BaseFetcher):
         """
         通过基类 HTTP 客户端下载 RSS/Atom，再用 feedparser 解析。
 
-        不直接把 URL 交给 feedparser，避免其内部 urllib 绕过统一的
-        User-Agent、连接复用和反爬策略。
+        不直接把 URL 交给 feedparser，确保网络访问统一使用基类客户端。
         """
-        response = self._make_request(
-            self.source.src, browser=True, reject_html=True
-        )
+        response = self._make_request(self.source.src)
         return feedparser.parse(response.content)
