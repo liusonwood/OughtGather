@@ -10,7 +10,10 @@ from src.utils.logger import get_logger
 
 
 class DedupTracker:
-    """记录每个内容源最近一次成功抓取到的 URL 集合。"""
+    """记录每个内容源最近一次成功抓取到的 URL 集合。
+
+    设计与文件格式见 docs/DEDUP.md。
+    """
 
     def __init__(self, data_file: str = "data/fetched_urls.txt"):
         self.data_file = data_file
@@ -75,7 +78,10 @@ class DedupTracker:
                 )
 
     def stage_source_snapshot(self, source_key: str, urls: Iterable[str]):
-        """暂存非空源快照，实际替换在 save() 时完成。"""
+        """暂存非空源快照，实际替换在 save() 时完成。
+
+        参见 docs/DEDUP.md 的“生命周期”章节。
+        """
         ids = {generate_content_id(url) for url in urls if url}
         if ids:
             with self._lock:

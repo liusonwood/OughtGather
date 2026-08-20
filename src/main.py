@@ -87,7 +87,7 @@ def has_valid_content(article: Article) -> bool:
 
 def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[FetchResult]:
     """
-    处理抓取结果（去重、内容处理）
+    处理抓取结果（去重、内容处理）。去重生命周期见 docs/DEDUP.md。
 
     仅当文章具备有效正文且对应抓取器开启去重时，才标记去重并纳入推送列表，
     避免全文抓取失败产生的空壳文章永久占用去重记录。
@@ -294,6 +294,7 @@ def main(argv=None):
                         res = fetcher.fetch_with_retry()
                     else:
                         source_key = tracker.make_source_key(source)
+                        # 参见 docs/DEDUP.md 的“两阶段抓取”：快照覆盖全部候选。
                         if fetcher.dedup_enabled and candidates:
                             tracker.stage_source_snapshot(
                                 source_key, [c.get("url") for c in candidates]
