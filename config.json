@@ -6,11 +6,12 @@
   "limit": 5,
   "body": [
     {
-      "type": "web",
-      "src": "https://www.scientificamerican.com/article/moderna-and-merck-announce-landmark-trial-showing-mrna-therapy-significantly-cuts-odds-of-recurrent-skin-cancer/",
-      "title": "",
-      "priority": "",
-      "keep_link": ""
+      "type": "rss",
+      "src": "https://hnrss.org/frontpage",
+      "title": "Hacker News 热门",
+      "priority": 15,
+      "keep_link": "Y",
+      "metadata": { "full_text": "N" }
     }
   ]
 }
