@@ -243,6 +243,56 @@ class TestGenerateFilename:
 
 
 # =========================================================================
+# 图片下载请求测试
+# =========================================================================
+
+class TestDownloadImage:
+    """图片下载请求应支持需要 Referer 的 CDN，并保持失败降级。"""
+
+    @patch("src.processors.image_processor.httpx.Client")
+    def test_uses_article_url_as_referer(self, mock_client):
+        response = MagicMock()
+        response.content = b"image-data"
+        client = mock_client.return_value.__enter__.return_value
+        client.get.return_value = response
+
+        processor = ImageProcessor()
+        result = processor._download_image(
+            "https://cdn.example.com/image.jpg",
+            base_url="https://example.com/articles/1",
+        )
+
+        assert result == b"image-data"
+        headers = client.get.call_args.kwargs["headers"]
+        assert headers["Referer"] == "https://example.com/articles/1"
+        assert headers["Accept"].startswith("image/")
+
+    @patch("src.processors.image_processor.httpx.Client")
+    def test_without_base_url_does_not_send_referer(self, mock_client):
+        response = MagicMock()
+        response.content = b"image-data"
+        client = mock_client.return_value.__enter__.return_value
+        client.get.return_value = response
+
+        result = ImageProcessor()._download_image("https://cdn.example.com/image.jpg")
+
+        assert result == b"image-data"
+        headers = client.get.call_args.kwargs["headers"]
+        assert "Referer" not in headers
+
+    @patch("src.processors.image_processor.httpx.Client")
+    def test_403_returns_none(self, mock_client):
+        import httpx
+
+        url = "https://cdn.example.com/image.jpg"
+        response = httpx.Response(403, request=httpx.Request("GET", url))
+        client = mock_client.return_value.__enter__.return_value
+        client.get.return_value = response
+
+        assert ImageProcessor()._download_image(url, base_url="https://example.com/article") is None
+
+
+# =========================================================================
 # 图片处理流程测试（mock 下载）
 # =========================================================================
 
