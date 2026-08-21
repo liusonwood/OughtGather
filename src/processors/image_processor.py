@@ -58,7 +58,7 @@ class ImageProcessor:
 
             # 下载图片
             self.logger.debug(f"Downloading image: {full_url}")
-            response = self._download_image(full_url)
+            response = self._download_image(full_url, base_url=base_url)
 
             if not response:
                 return None
@@ -99,12 +99,13 @@ class ImageProcessor:
             
         return urljoin(base_url, url)
 
-    def _download_image(self, url: str) -> Optional[bytes]:
+    def _download_image(self, url: str, base_url: Optional[str] = None) -> Optional[bytes]:
         """
         下载图片
 
         Args:
             url: 图片 URL
+            base_url: 来源文章 URL，用于防盗链请求的 Referer
         Returns:
             Optional[bytes]: 图片数据
         """
@@ -114,8 +115,14 @@ class ImageProcessor:
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/120.0.0.0 Safari/537.36"
-                )
+                ),
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
             }
+            if base_url:
+                parsed_base_url = urlparse(base_url)
+                if parsed_base_url.scheme in ("http", "https") and parsed_base_url.netloc:
+                    headers["Referer"] = base_url
+
             with httpx.Client(timeout=8, follow_redirects=True) as client:
                 response = client.get(url, headers=headers)
                 response.raise_for_status()
