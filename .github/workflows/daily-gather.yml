@@ -55,8 +55,6 @@ jobs:
     if: needs.check.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: write  # 允许 push 去重文件
 
     steps:
       - name: Checkout repository
