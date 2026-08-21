@@ -131,6 +131,13 @@ class TaskBufferHandler(logging.Handler):
                 self.handleError(record)
 
 
+class TaskBufferFilter(logging.Filter):
+    """在任务缓冲期间阻止文件/控制台 Handler 重复输出日志。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return TaskLogBuffer.get_current() is None
+
+
 class Logger:
     """单例日志记录器"""
 
@@ -173,6 +180,7 @@ class Logger:
             file_handler.setLevel(logging.DEBUG)
             file_formatter = logging.Formatter(log_format, date_format)
             file_handler.setFormatter(file_formatter)
+            file_handler.addFilter(TaskBufferFilter())
             self._logger.addHandler(file_handler)
 
             # 3. 控制台 Handler (支持 ANSI 彩色)
@@ -180,6 +188,7 @@ class Logger:
             console_handler.setLevel(logging.INFO)
             console_formatter = ColoredFormatter(log_format, date_format)
             console_handler.setFormatter(console_formatter)
+            console_handler.addFilter(TaskBufferFilter())
             self._logger.addHandler(console_handler)
 
     def get_logger(self) -> logging.Logger:

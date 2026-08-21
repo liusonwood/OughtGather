@@ -5,6 +5,7 @@ from src.utils.logger import (
     pad_string,
     truncate_url,
     ColoredFormatter,
+    TaskBufferFilter,
     TaskLogBuffer,
     start_task_buffer,
     stop_task_buffer,
@@ -63,6 +64,14 @@ def test_task_log_buffer_and_flush(caplog):
 
     assert "[rss | sspai.com] Thread log line 1" in caplog.text
     assert "[rss | sspai.com] Thread log line 2" in caplog.text
+
+
+def test_task_buffer_filter_suppresses_live_handlers_during_buffer():
+    start_task_buffer()
+    record = logging.LogRecord("test", logging.INFO, "path", 1, "message", (), None)
+    assert TaskBufferFilter().filter(record) is False
+    stop_task_buffer()
+    assert TaskBufferFilter().filter(record) is True
 
 
 def test_log_stage_banner_table(caplog):
