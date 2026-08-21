@@ -16,12 +16,19 @@ class TelegramFetcher(BaseFetcher):
     type_name = "telegram"
     src_placeholder = "Telegram 频道 ID, 例如: durov"
     
-    # 默认公用 RSSHub 节点池，用于故障转移 (Failover)
+    # 默认公用 RSSHub 节点池，用于故障转移 (Failover) 
+    # 测试 RSSHub 节点使用scripts/test_rsshub_instances.py
     DEFAULT_NODES = [
         "https://rsshub.rssforever.com",
-        "https://rsshub.app",
-        "https://rsshub.outv.im",
-        "https://rsshub.m-f.space"
+        "https://rsshub.ktachibana.party",
+        "https://hub.slarker.me",
+        "https://rss.peachyjoy.top",
+        "https://rsshub.umzzz.com",
+        "https://rsshub.isrss.com",
+        "https://rsshub.asailor.org",
+        "https://rsshub.cups.moe",
+        "https://rsshub.liumingye.cn",
+        "https://rss.owo.nz",
     ]
 
     config_schema = {

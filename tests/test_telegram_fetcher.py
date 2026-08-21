@@ -157,6 +157,21 @@ class TestTelegramFetcher:
         assert len(result.articles) == 3
         assert mock_make_request.call_count == 3
 
+        called_urls = [call.args[0] for call in mock_make_request.call_args_list]
+        assert called_urls == [
+            "https://rsshub.bad-node.com/telegram/channel/durov",
+            "https://rsshub.rssforever.com/telegram/channel/durov",
+            "https://rsshub.ktachibana.party/telegram/channel/durov",
+        ]
+
+    def test_default_nodes_order(self):
+        """默认节点应按稳定性优先顺序排列"""
+        assert TelegramFetcher.DEFAULT_NODES[:3] == [
+            "https://rsshub.rssforever.com",
+            "https://rsshub.ktachibana.party",
+            "https://hub.slarker.me",
+        ]
+
     @patch.object(TelegramFetcher, "_make_request")
     def test_feed_parse_bozo_error(self, mock_make_request):
         """测试 Feed 存在 bozo 异常解析错误的处理"""
