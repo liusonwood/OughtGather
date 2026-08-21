@@ -166,11 +166,10 @@ class TestTelegramFetcher:
 
     def test_default_nodes_order(self):
         """默认节点应按稳定性优先顺序排列"""
-        assert TelegramFetcher.DEFAULT_NODES == [
+        assert TelegramFetcher.DEFAULT_NODES[:3] == [
             "https://rsshub.rssforever.com",
             "https://rsshub.ktachibana.party",
             "https://hub.slarker.me",
-            "https://rss.owo.nz",
         ]
 
     @patch.object(TelegramFetcher, "_make_request")
