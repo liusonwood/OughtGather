@@ -197,6 +197,7 @@ def main(argv=None):
         config = load_config(args.config)
         logger.info(f"成功加载 {len(config.body)} 个内容源配置")
         tracker = DedupTracker()
+        dedup_start_count = tracker.get_stats()["total_fetched"]
 
         # ------------------------------------------------------------------
         # Fresh Start 工作流处理
@@ -346,7 +347,7 @@ def main(argv=None):
                 records = stop_task_buffer()
                 return res, records
             except Exception as e:
-                logger.error(f"抓取异常失败 {source.src}: {e}")
+                logger.exception(f"抓取异常失败 {source.src}: {e}")
                 if fetcher is not None:
                     fetcher.close()
                 res = FetchResult(source=source, articles=[], success=False, error=str(e))
@@ -374,7 +375,7 @@ def main(argv=None):
                     if not result.success:
                         error_log.append(f"[{source.type}] {source.src}: {result.error}")
                 except Exception as e:
-                    logger.error(f"线程执行失败 [{source.type}] {source.src}: {e}")
+                    logger.exception(f"线程执行失败 [{source.type}] {source.src}: {e}")
                     error_log.append(f"[{source.type}] {source.src}: {str(e)}")
                     res = FetchResult(source=source, articles=[], success=False, error=str(e))
                     results.append(res)
@@ -398,19 +399,25 @@ def main(argv=None):
             try:
                 sender = SMTPSender()
                 subject = config.title.get_plain_text()
-                sender.send_epub(epub_path, subject)
+                if not sender.send_epub(epub_path, subject):
+                    logger.error("发送邮件失败: SMTP sender returned False")
+                    error_log.append("Email sending failed: sender returned False")
             except Exception as e:
-                logger.error(f"发送邮件失败: {e}")
+                logger.exception(f"发送邮件失败: {e}")
                 error_log.append(f"Email sending failed: {str(e)}")
 
             logger.info("正在上传 EPUB 至 WebDAV...")
             try:
                 from src.uploader.webdav_uploader import WebDavUploader
                 uploader = WebDavUploader()
-                if uploader.upload_epub(epub_path):
+                uploaded = uploader.upload_epub(epub_path)
+                if uploaded:
                     logger.info("EPUB 成功上传至 WebDAV")
+                elif getattr(getattr(uploader, "config", None), "enabled", False):
+                    logger.error("WebDAV 上传失败: uploader returned False")
+                    error_log.append("WebDAV upload failed: uploader returned False")
             except Exception as e:
-                logger.error(f"WebDAV 上传失败: {e}")
+                logger.exception(f"WebDAV 上传失败: {e}")
                 error_log.append(f"WebDAV upload failed: {str(e)}")
 
         # 始终保存去重数据库（确保 limit 截断标记以及新增抓取的记录得到持久化）
@@ -418,15 +425,19 @@ def main(argv=None):
         tracker.save()
 
         # 6. 输出执行数据汇总表格
-        summary_headers = ["#", "类型", "内容源 / URL", "状态", "抓取数", "新增数", "备注 / 错误"]
+        summary_headers = ["#", "类型", "内容源 / URL", "状态", "抓取数", "新增数", "错误数", "备注 / 错误"]
         summary_rows = []
         for idx, res in enumerate(processed_results, start=1):
             s = res.source
             raw_c = raw_counts.get(s, len(res.articles) if res.success else 0)
             new_c = len(res.articles) if res.success else 0
+            error_count = res.error_count if isinstance(res.error_count, int) else 0
             if not res.success:
                 status = "FAILED"
                 note = truncate_url(res.error or "Unknown error", 30)
+            elif error_count > 0:
+                status = "PARTIAL"
+                note = res.error or f"部分处理失败 {error_count} 条"
             elif new_c > 0:
                 status = "SUCCESS"
                 note = ""
@@ -441,6 +452,7 @@ def main(argv=None):
                 status,
                 raw_c,
                 new_c,
+                error_count,
                 note
             ])
 
@@ -448,7 +460,16 @@ def main(argv=None):
         log_summary_table(summary_headers, summary_rows)
 
         stats = tracker.get_stats()
-        logger.info(f"历史累计抓取: {stats['total_fetched']} | 本次新增入库: {stats['new_fetched']}")
+        logger.info(
+            f"去重数据库保存完成: 新增={stats['snapshot_added']} 条, "
+            f"移除={stats['snapshot_removed']} 条, "
+            f"当前={stats['total_fetched']} 条"
+        )
+        logger.info(f"运行结束后去重记录={stats['total_fetched']} 条")
+        logger.info(
+            f"去重记录变化: {dedup_start_count} → {stats['total_fetched']} "
+            f"(本次新增入库={stats['new_fetched']} 条)"
+        )
 
     except Exception as e:
         logger.exception(f"Fatal error: {e}")

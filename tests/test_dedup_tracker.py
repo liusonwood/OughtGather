@@ -43,6 +43,9 @@ def test_snapshot_replaces_previous_ids_for_same_source(tmp_dir):
     assert not tracker.is_fetched(url(1), source_key)
     assert tracker.is_fetched(url(2), source_key)
     assert tracker.is_fetched(url(3), source_key)
+    stats = tracker.get_stats()
+    assert stats["snapshot_added"] == 3
+    assert stats["snapshot_removed"] == 1
 
 
 def test_empty_snapshot_preserves_previous_ids(tmp_dir):

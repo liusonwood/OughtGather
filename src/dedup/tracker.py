@@ -20,9 +20,12 @@ class DedupTracker:
         self.logger = get_logger()
         self.source_ids: Dict[str, Set[str]] = {}
         self._pending_snapshots: Dict[str, Set[str]] = {}
+        self._pending_snapshot_stats: Dict[str, dict] = {}
         self.fetched_ids: Set[str] = set()
         self.new_ids: Set[str] = set()
         self._session_new_ids: Set[str] = set()
+        self._session_snapshot_added = 0
+        self._session_snapshot_removed = 0
         self._lock = threading.Lock()
         self._load()
 
@@ -52,9 +55,11 @@ class DedupTracker:
                         loaded += 1
             with self._lock:
                 self._refresh_fetched_ids()
-            self.logger.info(f"Loaded {loaded} source-scoped content IDs")
+            self.logger.info(
+                f"去重记录加载完成: 运行开始时={sum(len(ids) for ids in self.source_ids.values())} 条"
+            )
         except Exception as e:
-            self.logger.error(f"Failed to load dedup file: {e}")
+            self.logger.exception(f"去重记录加载失败: {e}")
 
     def is_fetched(self, url: str, source_key: str) -> bool:
         if not url:
@@ -85,7 +90,24 @@ class DedupTracker:
         ids = {generate_content_id(url) for url in urls if url}
         if ids:
             with self._lock:
+                previous = self.source_ids.get(source_key, set())
                 self._pending_snapshots[source_key] = ids
+                self._pending_snapshot_stats[source_key] = {
+                    "previous": len(previous),
+                    "current": len(ids),
+                    "added": len(ids - previous),
+                    "removed": len(previous - ids),
+                    "retained": len(previous & ids),
+                }
+                stats = self._pending_snapshot_stats[source_key]
+                self._session_snapshot_added += stats["added"]
+                self._session_snapshot_removed += stats["removed"]
+                self.logger.info(
+                    f"去重快照变化: source={source_key}, "
+                    f"上次={stats['previous']} 条, 本次={stats['current']} 条, "
+                    f"新增={stats['added']} 条, 移除={stats['removed']} 条, "
+                    f"保留={stats['retained']} 条"
+                )
 
     def save(self):
         with self._lock:
@@ -96,6 +118,7 @@ class DedupTracker:
                 self._session_new_ids.update(ids - self.source_ids.get(source_key, set()))
                 self.source_ids[source_key] = set(ids)
             self._pending_snapshots.clear()
+            self._pending_snapshot_stats.clear()
             self._refresh_fetched_ids()
             snapshot = {key: set(ids) for key, ids in self.source_ids.items() if ids}
 
@@ -114,17 +137,22 @@ class DedupTracker:
                     os.unlink(temp_path)
             with self._lock:
                 self.new_ids.clear()
-            self.logger.info(f"Saved {sum(len(ids) for ids in snapshot.values())} source-scoped content IDs")
+            self.logger.info(
+                f"去重数据库保存完成: 当前={sum(len(ids) for ids in snapshot.values())} 条"
+            )
         except Exception as e:
-            self.logger.error(f"Failed to save dedup file: {e}")
+            self.logger.exception(f"去重数据库保存失败: {e}")
 
     def clear(self):
         with self._lock:
             self.source_ids.clear()
             self._pending_snapshots.clear()
+            self._pending_snapshot_stats.clear()
             self.fetched_ids.clear()
             self.new_ids.clear()
             self._session_new_ids.clear()
+            self._session_snapshot_added = 0
+            self._session_snapshot_removed = 0
             if os.path.exists(self.data_file):
                 try:
                     with open(self.data_file, "w", encoding="utf-8") as f:
@@ -136,8 +164,10 @@ class DedupTracker:
     def get_stats(self) -> dict:
         with self._lock:
             return {
-                "total_fetched": len(self.fetched_ids),
+                "total_fetched": sum(len(ids) for ids in self.source_ids.values()),
                 "new_fetched": len(self._session_new_ids),
+                "snapshot_added": self._session_snapshot_added,
+                "snapshot_removed": self._session_snapshot_removed,
             }
 
     def clear_new_ids(self):
