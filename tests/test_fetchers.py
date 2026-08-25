@@ -213,6 +213,38 @@ class TestBaseFetcherMakeRequest:
                     allow_browser_fallback=True,
                 )
 
+    @patch("src.fetchers.base.validate_url", return_value=False)
+    def test_browser_route_blocks_unsafe_destination(self, _mock_validate):
+        fetcher = self._make_fetcher()
+        route = MagicMock()
+        route.request.url = "http://127.0.0.1:8080/internal"
+
+        fetcher._handle_browser_route(route)
+
+        route.abort.assert_called_once_with()
+        route.continue_.assert_not_called()
+
+    @patch("src.fetchers.base.validate_url", return_value=True)
+    def test_browser_route_allows_public_destination(self, _mock_validate):
+        fetcher = self._make_fetcher()
+        route = MagicMock()
+        route.request.url = "https://cdn.example.com/app.js"
+
+        fetcher._handle_browser_route(route)
+
+        route.continue_.assert_called_once_with()
+        route.abort.assert_not_called()
+
+    def test_browser_route_allows_local_browser_resource(self):
+        fetcher = self._make_fetcher()
+        route = MagicMock()
+        route.request.url = "data:text/javascript,console.log(1)"
+
+        fetcher._handle_browser_route(route)
+
+        route.continue_.assert_called_once_with()
+        route.abort.assert_not_called()
+
 
 # =========================================================================
 # RSSFetcher 测试
@@ -625,19 +657,17 @@ class TestMailFetcher:
     def test_fetch_emails(self, mock_request, mail_source):
         """测试邮件抓取"""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
+        mock_response.json.return_value = {"data": {"inbox": {
             "result": "success",
-            "emails": [
-                {
-                    "subject": "邮件 1",
-                    "from": "sender@example.com",
-                    "to": "test@testmail.app",
-                    "timestamp": "2024-01-01T00:00:00Z",
-                    "html": "<p>邮件内容</p>",
-                    "attachments": [],
-                }
-            ],
-        }
+            "emails": [{
+                "subject": "邮件 1",
+                "from": "sender@example.com",
+                "to": "test@testmail.app",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "html": "<p>邮件内容</p>",
+                "attachments": [],
+            }],
+        }}}
         mock_request.return_value = mock_response
 
         fetcher = MailFetcher(mail_source)
@@ -653,10 +683,10 @@ class TestMailFetcher:
     def test_api_error(self, mock_request, mail_source):
         """测试 API 返回错误"""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
+        mock_response.json.return_value = {"data": {"inbox": {
             "result": "error",
             "message": "Invalid API key",
-        }
+        }}}
         mock_request.return_value = mock_response
 
         fetcher = MailFetcher(mail_source)
@@ -678,44 +708,53 @@ class TestMailFetcher:
 
     @patch.dict("os.environ", {"TESTMAIL_APP_API_KEY": "test_key_123"})
     @patch.object(MailFetcher, "_make_request")
-    def test_namespace_url_encoded(self, mock_request):
-        """测试 namespace.tag 格式被正确拆分"""
+    def test_graphql_auth_and_namespace_variables(self, mock_request):
+        """namespace.tag is split without placing the API key in the URL."""
         source = ContentSource(
             type="mail", src="my.namespace",
             title="Test",
         )
         mock_response = MagicMock()
-        mock_response.json.return_value = {"result": "success", "emails": []}
+        mock_response.json.return_value = {"data": {"inbox": {"result": "success", "emails": []}}}
         mock_request.return_value = mock_response
 
         fetcher = MailFetcher(source)
         result = fetcher.fetch()
 
-        # 验证 namespace 和 tag 被正确拆分
-        call_args = mock_request.call_args
-        api_url = call_args[0][0]
-        assert "namespace=my" in api_url
-        assert "tag=namespace" in api_url
+        request = mock_request.call_args.kwargs
+        assert mock_request.call_args.args[0] == "https://api.testmail.app/api/graphql"
+        assert request["headers"]["Authorization"] == "Bearer test_key_123"
+        assert request["json"]["variables"] == {"namespace": "my", "tag": "namespace", "limit": 15}
 
     @patch.dict("os.environ", {"TESTMAIL_APP_API_KEY": "test_key_123"})
     @patch.object(MailFetcher, "_make_request")
-    def test_metadata_query_params(self, mock_request):
-        """测试 metadata 参数正确构建到请求 URL 中"""
+    def test_metadata_graphql_variables(self, mock_request):
+        """metadata filters are sent as GraphQL variables."""
         source = ContentSource(
             type="mail", src="testns",
             metadata={"tag": "daily", "limit": 10, "timestamp_from": 1718300000000},
         )
         mock_response = MagicMock()
-        mock_response.json.return_value = {"result": "success", "emails": []}
+        mock_response.json.return_value = {"data": {"inbox": {"result": "success", "emails": []}}}
         mock_request.return_value = mock_response
 
         fetcher = MailFetcher(source)
         result = fetcher.fetch()
 
-        api_url = mock_request.call_args[0][0]
-        assert "tag=daily" in api_url
-        assert "limit=10" in api_url
-        assert "timestamp_from=1718300000000" in api_url
+        variables = mock_request.call_args.kwargs["json"]["variables"]
+        assert variables["tag"] == "daily"
+        assert variables["limit"] == 10
+        assert variables["timestamp_from"] == 1718300000000
+
+    @patch.dict("os.environ", {"TESTMAIL_APP_API_KEY": "test_key_123"})
+    @patch.object(MailFetcher, "_make_request")
+    def test_error_does_not_expose_api_key(self, mock_request, mail_source):
+        mock_request.side_effect = RuntimeError(
+            "request failed https://api.testmail.app/api/graphql?apikey=test_key_123"
+        )
+        result = MailFetcher(mail_source).fetch()
+        assert "test_key_123" not in result.error
+        assert "[REDACTED]" in result.error
 
     @patch.dict("os.environ", {"TESTMAIL_APP_API_KEY": "test_key_123"})
     def test_extract_images_skips_social_and_tracking(self):

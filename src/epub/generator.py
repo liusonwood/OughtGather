@@ -24,6 +24,8 @@ import html as html_module
 class EPUBGenerator:
     """EPUB 生成器"""
 
+    MAX_IMAGES_PER_RUN = 400
+
     def __init__(self, config: Config):
         """
         初始化 EPUB 生成器
@@ -259,6 +261,7 @@ class EPUBGenerator:
         # 1. 收集所有章节中的唯一图片 URL
         self.logger.info("Gathering all unique image URLs from chapters...")
         unique_images = {}  # image_src -> page_url (用于解析相对路径)
+        skipped_image_count = 0
         
         # 检查全局设置
         global_load_images = self.config.load_images == 'Y'
@@ -285,7 +288,16 @@ class EPUBGenerator:
                 src, _ = self._extract_image_src(img)
                 if src and not src.startswith('data:'):
                     if src not in unique_images:
-                        unique_images[src] = article.url
+                        if len(unique_images) < self.MAX_IMAGES_PER_RUN:
+                            unique_images[src] = article.url
+                        else:
+                            skipped_image_count += 1
+
+        if skipped_image_count:
+            self.logger.warning(
+                f"Limiting image downloads to {self.MAX_IMAGES_PER_RUN}; "
+                f"skipping {skipped_image_count} additional images"
+            )
 
         # 2. 并发下载和处理图片
         import concurrent.futures

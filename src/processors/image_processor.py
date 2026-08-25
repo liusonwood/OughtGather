@@ -12,6 +12,7 @@ import httpx
 from PIL import Image
 
 from src.utils.logger import get_logger
+from src.utils.safe_url import validate_url
 
 
 class ImageProcessor:
@@ -20,6 +21,7 @@ class ImageProcessor:
     MAX_SIZE_KB = 600  # 单张图片最大大小（KB）- 提高以保留更多细节
     MAX_WIDTH = 1200  # 最大宽度 - 适配 modern Kindle (300 ppi) 和大屏阅读器
     MAX_HEIGHT = 1800  # 最大高度 - 适配常见阅读器视口
+    MAX_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 单张图片原始响应最大 10 MB
     JPEG_QUALITY = 88  # JPEG 质量 - 提高以获得更清晰的图片
     MIN_WIDTH = 120  # 最小宽度（过滤头像、图标、表情等装饰性小图）
     MIN_HEIGHT = 120  # 最小高度
@@ -110,6 +112,10 @@ class ImageProcessor:
             Optional[bytes]: 图片数据
         """
         try:
+            if not validate_url(url):
+                self.logger.warning(f"Blocked unsafe image URL: {url}")
+                return None
+
             headers = {
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -123,10 +129,28 @@ class ImageProcessor:
                 if parsed_base_url.scheme in ("http", "https") and parsed_base_url.netloc:
                     headers["Referer"] = base_url
 
-            with httpx.Client(timeout=8, follow_redirects=True) as client:
-                response = client.get(url, headers=headers)
-                response.raise_for_status()
-                return response.content
+            with httpx.Client(timeout=8, follow_redirects=False) as client:
+                with client.stream("GET", url, headers=headers) as response:
+                    response.raise_for_status()
+
+                    content_length = response.headers.get("Content-Length")
+                    if content_length:
+                        try:
+                            if int(content_length) > self.MAX_DOWNLOAD_SIZE:
+                                self.logger.warning(f"Image exceeds download limit: {url}")
+                                return None
+                        except ValueError:
+                            self.logger.warning(f"Invalid Content-Length for image: {url}")
+
+                    chunks = []
+                    total_size = 0
+                    for chunk in response.iter_bytes():
+                        total_size += len(chunk)
+                        if total_size > self.MAX_DOWNLOAD_SIZE:
+                            self.logger.warning(f"Image exceeds download limit: {url}")
+                            return None
+                        chunks.append(chunk)
+                    return b"".join(chunks)
 
         except Exception as e:
             self.logger.error(f"Failed to download image from {url}: {e}")

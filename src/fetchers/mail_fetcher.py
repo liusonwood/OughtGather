@@ -1,12 +1,11 @@
 import os
 import re
-from typing import List, Optional
-from urllib.parse import quote
+from typing import Any, Dict, List, Optional
 from bs4 import BeautifulSoup
 
 from src.config import ContentSource
 from src.fetchers.base import BaseFetcher, FetchResult, Article
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, redact_sensitive_text
 from src.utils.helpers import format_date
 
 
@@ -71,22 +70,29 @@ class MailFetcher(BaseFetcher):
             else:
                 namespace, tag = src_clean, None
 
-            namespace_encoded = quote(namespace, safe='')
-            api_url = (
-                f"https://api.testmail.app/api/json"
-                f"?apikey={self.config['api_key']}"
-                f"&namespace={namespace_encoded}"
+            response = self._make_request(
+                "https://api.testmail.app/api/graphql",
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {self.config['api_key']}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json={
+                    "query": self._GRAPHQL_QUERY,
+                    "variables": self._build_graphql_variables(namespace, tag),
+                },
             )
-
-            # 添加可选的查询参数（tag 可以从 src 或 metadata 中获取）
-            api_url += self._build_query_params(tag)
-
-            response = self._make_request(api_url)
-            data = response.json()
+            payload = response.json()
+            if payload.get("errors"):
+                result.success = False
+                result.error = f"GraphQL API error: {redact_sensitive_text(payload['errors'])}"
+                return result
+            data = payload.get("data", {}).get("inbox", {})
 
             # 检查 API 响应
             if data.get("result") != "success":
-                error_msg = data.get("message", "Unknown API error")
+                error_msg = redact_sensitive_text(data.get("message", "Unknown API error"))
                 result.success = False
                 result.error = f"API error: {error_msg}"
                 return result
@@ -107,10 +113,72 @@ class MailFetcher(BaseFetcher):
             return result
 
         except Exception as e:
-            self.logger.error(f"Mail fetch failed: {e}")
+            safe_error = redact_sensitive_text(e)
+            self.logger.error(f"Mail fetch failed: {safe_error}")
             result.success = False
-            result.error = str(e)
+            result.error = safe_error
             return result
+
+    _GRAPHQL_QUERY = """
+    query GetInbox(
+      $namespace: String!,
+      $tag: String,
+      $tag_prefix: String,
+      $timestamp_from: Float,
+      $timestamp_to: Float,
+      $limit: Int,
+      $offset: Int
+    ) {
+      inbox(
+        namespace: $namespace,
+        tag: $tag,
+        tag_prefix: $tag_prefix,
+        timestamp_from: $timestamp_from,
+        timestamp_to: $timestamp_to,
+        limit: $limit,
+        offset: $offset
+      ) {
+        result
+        message
+        count
+        emails {
+          subject
+          from
+          to
+          timestamp
+          html
+          text
+          attachments {
+            filename
+            contentType
+            checksum
+            size
+            downloadUrl
+            contentId
+            cid
+            related
+          }
+        }
+      }
+    }
+    """
+
+    def _build_graphql_variables(
+        self, namespace: str, tag_from_src: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Build GraphQL variables without putting credentials in a URL."""
+        metadata = self.source.metadata if hasattr(self.source, "metadata") else {}
+        variables: Dict[str, Any] = {
+            "namespace": namespace,
+            "limit": min(metadata.get("limit", self.global_limit), 100),
+        }
+        tag = metadata.get("tag", tag_from_src)
+        if tag is not None:
+            variables["tag"] = str(tag)
+        for name in ("tag_prefix", "timestamp_from", "timestamp_to", "offset"):
+            if name in metadata:
+                variables[name] = metadata[name]
+        return variables
 
     def _parse_email(self, email: dict) -> Article:
         """
@@ -306,58 +374,3 @@ class MailFetcher(BaseFetcher):
         except Exception as e:
             self.logger.warning(f"Failed to sanitize HTML: {e}")
             return html
-
-    def _build_query_params(self, tag_from_src: Optional[str] = None) -> str:
-        """
-        构建可选的查询参数
-
-        支持通过 source.metadata 配置以下参数：
-        - tag: 按标签过滤
-        - tag_prefix: 按标签前缀过滤
-        - timestamp_from: 起始时间戳（毫秒）
-        - timestamp_to: 结束时间戳（毫秒）
-        - limit: 返回邮件数量限制（默认 10，最大 100）
-        - offset: 偏移量（默认 0，最大 9899）
-
-        Args:
-            tag_from_src: 从 src 字段解析出的 tag（如 "namespace.tag" 中的 "tag"）
-
-        Returns:
-            str: 查询参数字符串
-        """
-        params = []
-
-        # 从 metadata 中读取可选参数
-        metadata = self.source.metadata if hasattr(self.source, 'metadata') else {}
-
-        if not metadata:
-            # 默认只返回最新的邮件（使用全局限制）
-            if tag_from_src:
-                params.append(f"tag={quote(tag_from_src, safe='')}")
-            params.append(f"limit={self.global_limit}")
-            return "&" + "&".join(params) if params else ""
-
-        # 标签过滤（metadata 中的 tag 优先于 src 中的 tag）
-        if "tag" in metadata:
-            params.append(f"tag={quote(str(metadata['tag']), safe='')}")
-        elif tag_from_src:
-            params.append(f"tag={quote(tag_from_src, safe='')}")
-
-        if "tag_prefix" in metadata:
-            params.append(f"tag_prefix={quote(str(metadata['tag_prefix']), safe='')}")
-
-        # 时间范围过滤
-        if "timestamp_from" in metadata:
-            params.append(f"timestamp_from={metadata['timestamp_from']}")
-
-        if "timestamp_to" in metadata:
-            params.append(f"timestamp_to={metadata['timestamp_to']}")
-
-        # 数量和偏移
-        limit = min(metadata.get("limit", self.global_limit), 100)  # 最大 100
-        params.append(f"limit={limit}")
-
-        if "offset" in metadata:
-            params.append(f"offset={metadata['offset']}")
-
-        return "&" + "&".join(params) if params else ""

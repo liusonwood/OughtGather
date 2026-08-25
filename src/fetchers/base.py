@@ -13,6 +13,7 @@ import trafilatura
 
 from src.config import ContentSource
 from src.utils.logger import get_logger
+from src.utils.safe_url import validate_url
 
 
 @dataclass
@@ -361,7 +362,10 @@ class BaseFetcher(ABC):
         if self._browser is None:
             self.logger.info("[Playwright] Launching headless Chromium")
             self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(headless=True)
+            self._browser = self._playwright.chromium.launch(
+                headless=True,
+                chromium_sandbox=True,
+            )
         else:
             self.logger.info("[Playwright] Reusing headless Chromium")
 
@@ -381,6 +385,7 @@ class BaseFetcher(ABC):
             extra_http_headers=browser_headers or None,
         )
         context = self._browser_context
+        context.route("**/*", self._handle_browser_route)
         try:
             page = context.new_page()
             document_statuses = []
@@ -442,6 +447,26 @@ class BaseFetcher(ABC):
             except Exception:
                 pass
             self._browser_context = None
+
+    def _handle_browser_route(self, route):
+        """Block browser requests to non-public network destinations.
+
+        Playwright follows redirects internally. Validating every request at
+        the route layer ensures a redirect cannot bypass the initial URL
+        check. Data/blob URLs are local browser resources and do not create a
+        network connection, so they remain allowed.
+        """
+        request_url = route.request.url
+        if request_url.startswith(("data:", "blob:", "about:blank")):
+            route.continue_()
+            return
+
+        if validate_url(request_url):
+            route.continue_()
+            return
+
+        self.logger.warning(f"Blocked unsafe Playwright request: {request_url}")
+        route.abort()
 
     def _close_browser(self):
         """关闭当前 fetcher 的 Playwright 资源。"""

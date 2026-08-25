@@ -1548,6 +1548,12 @@
       return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    function normalizeSourceType(type) {
+      return typeof type === 'string' && Object.prototype.hasOwnProperty.call(FETCHERS_SCHEMA, type)
+        ? type
+        : '';
+    }
+
     // ---- Validation / Self-check ----
     function validateConfig() {
       const errors = [];
@@ -1840,7 +1846,7 @@
       if (Array.isArray(config.body)) {
         config.body.forEach(item => {
           const s = createEmptySource();
-          s.type = item.type || '';
+          s.type = normalizeSourceType(item.type);
           s.src = item.src || '';
           s.title = item.title || '';
           s.priority = item.priority || '';
