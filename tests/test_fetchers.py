@@ -4,6 +4,7 @@
 """
 
 import json
+import httpx
 import pytest
 from unittest.mock import MagicMock, patch
 from urllib.parse import quote
@@ -153,6 +154,99 @@ class TestBaseFetcherMakeRequest:
         fetcher._make_request("https://example.com", raise_for_status=False)
 
         mock_response.raise_for_status.assert_not_called()
+
+    def test_redirect_is_validated_before_next_request(self):
+        fetcher = self._make_fetcher()
+        first = httpx.Response(
+            302,
+            headers={"Location": "/next"},
+            request=httpx.Request(
+                "POST",
+                "https://example.com/start",
+                headers={"X-Test": "yes", "Content-Type": "application/json"},
+                content=b'{"q":"hi"}',
+            ),
+        )
+        final = httpx.Response(
+            200,
+            content=b"ok",
+            request=httpx.Request("POST", "https://example.com/next"),
+        )
+        mock_client = MagicMock()
+        mock_client.is_closed = False
+        mock_client.request.side_effect = [first, final]
+        fetcher._client = mock_client
+
+        with patch("src.fetchers.base.validate_url", return_value=True) as validate:
+            result = fetcher._make_request(
+                "https://example.com/start",
+                method="POST",
+                headers={"X-Test": "yes", "Content-Type": "application/json"},
+                json={"q": "hi"},
+                timeout=12,
+            )
+
+        assert result is final
+        validate.assert_called_once_with("https://example.com/next")
+        assert mock_client.request.call_count == 2
+        redirect_call = mock_client.request.call_args_list[1]
+        assert redirect_call.args[:2] == ("POST", "https://example.com/next")
+        assert redirect_call.kwargs["headers"]["x-test"] == "yes"
+        assert redirect_call.kwargs["content"] == b'{"q":"hi"}'
+        assert redirect_call.kwargs["timeout"] == 12
+        assert redirect_call.kwargs["follow_redirects"] is False
+
+    @pytest.mark.parametrize(
+        "location",
+        [
+            "http://127.0.0.1/internal",
+            "http://10.0.0.1/internal",
+            "http://[::1]/internal",
+            "ftp://example.com/file",
+            "https://user:password@example.com/private",
+        ],
+    )
+    def test_redirect_to_unsafe_destination_is_rejected(self, location):
+        fetcher = self._make_fetcher()
+        first = httpx.Response(
+            302,
+            headers={"Location": location},
+            request=httpx.Request("GET", "https://example.com/start"),
+        )
+        mock_client = MagicMock()
+        mock_client.is_closed = False
+        mock_client.request.return_value = first
+        fetcher._client = mock_client
+
+        with patch("src.fetchers.base.validate_url", return_value=False):
+            with pytest.raises(httpx.InvalidURL, match="Unsafe redirect target"):
+                fetcher._make_request("https://example.com/start")
+
+        assert mock_client.request.call_count == 1
+
+    def test_redirect_limit_is_enforced(self):
+        fetcher = self._make_fetcher()
+        responses = []
+        for index in range(fetcher.MAX_REDIRECTS + 1):
+            current = f"https://example.com/{index}"
+            target = f"https://example.com/{index + 1}"
+            responses.append(
+                httpx.Response(
+                    302,
+                    headers={"Location": target},
+                    request=httpx.Request("GET", current),
+                )
+            )
+        mock_client = MagicMock()
+        mock_client.is_closed = False
+        mock_client.request.side_effect = responses
+        fetcher._client = mock_client
+
+        with patch("src.fetchers.base.validate_url", return_value=True):
+            with pytest.raises(httpx.TooManyRedirects, match="maximum of 5"):
+                fetcher._make_request("https://example.com/0")
+
+        assert mock_client.request.call_count == fetcher.MAX_REDIRECTS + 1
 
     def test_non_200_page_uses_browser_fallback(self):
         fetcher = self._make_fetcher()

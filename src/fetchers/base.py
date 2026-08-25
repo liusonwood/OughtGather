@@ -8,6 +8,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
+from urllib.parse import urljoin
 import httpx
 import trafilatura
 
@@ -77,6 +78,8 @@ def get_fetcher_class(type_name: str) -> Optional[Any]:
 
 class BaseFetcher(ABC):
     """基础抓取器抽象类"""
+
+    MAX_REDIRECTS = 5
 
     type_name: str = ""
     src_placeholder: str = ""
@@ -294,7 +297,7 @@ class BaseFetcher(ABC):
 
         if not hasattr(self, '_client') or self._client is None or self._client.is_closed:
             limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
-            self._client = httpx.Client(timeout=timeout, follow_redirects=True, limits=limits)
+            self._client = httpx.Client(timeout=timeout, follow_redirects=False, limits=limits)
 
         response = self._client.request(
             method,
@@ -304,8 +307,45 @@ class BaseFetcher(ABC):
             json=json,
             data=data,
             params=params,
+            follow_redirects=False,
         )
         response.read()  # 确保读取响应体
+
+        redirect_count = 0
+        while True:
+            status_code = getattr(response, "status_code", None)
+            is_redirect = isinstance(status_code, int) and 300 <= status_code < 400
+            location = response.headers.get("location") if is_redirect else None
+            if not location:
+                break
+
+            if redirect_count >= self.MAX_REDIRECTS:
+                raise httpx.TooManyRedirects(
+                    f"Exceeded maximum of {self.MAX_REDIRECTS} redirects",
+                    request=response.request,
+                )
+
+            current_url = str(response.request.url)
+            target = urljoin(current_url, location)
+            if not validate_url(target):
+                raise httpx.InvalidURL(f"Unsafe redirect target: {target}")
+
+            # Build the next request explicitly so the target is validated
+            # before httpx opens the connection. Preserve the method and body
+            # rather than letting a redirect policy silently change them.
+            request_headers = dict(response.request.headers)
+            request_headers.pop("host", None)
+            request_headers.pop("content-length", None)
+            response = self._client.request(
+                response.request.method,
+                target,
+                headers=request_headers,
+                content=response.request.content,
+                timeout=timeout,
+                follow_redirects=False,
+            )
+            response.read()
+            redirect_count += 1
 
         # Playwright 回退说明见 docs/PLAYWRIGHT.md。只有明确标记的 HTML 页面请求才启用浏览器，避免 API/XML 请求
         # 在遇到普通错误时启动 Chromium。
