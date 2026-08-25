@@ -21,6 +21,36 @@ def _make_article(content: str, title: str = "Test") -> Article:
     )
 
 
+class TestImageAdjacentParagraphs:
+    """图片前段落的 Kindle 排版兼容处理。"""
+
+    @pytest.fixture
+    def processor(self):
+        return ContentProcessor(ContentSource(type="web", src="https://example.com"))
+
+    def test_marks_paragraph_before_direct_image(self, processor):
+        result = processor.process(_make_article('<p>正文内容</p><img src="image.jpg">'))
+        soup = BeautifulSoup(result.content, 'lxml')
+        assert 'image-adjacent-text' in soup.find('p').get('class', [])
+
+    def test_marks_paragraph_before_figure_image(self, processor):
+        html = '<p>正文内容</p>\n  <figure class="image"><img src="image.jpg"></figure>'
+        result = processor.process(_make_article(html))
+        soup = BeautifulSoup(result.content, 'lxml')
+        assert 'image-adjacent-text' in soup.find('p').get('class', [])
+
+    def test_does_not_mark_paragraph_before_non_image_content(self, processor):
+        result = processor.process(_make_article('<p>正文内容</p><p>下一段</p>'))
+        soup = BeautifulSoup(result.content, 'lxml')
+        assert 'image-adjacent-text' not in soup.find('p').get('class', [])
+
+    def test_does_not_mark_non_adjacent_paragraph(self, processor):
+        html = '<p>正文内容</p><h2>小标题</h2><figure><img src="image.jpg"></figure>'
+        result = processor.process(_make_article(html))
+        soup = BeautifulSoup(result.content, 'lxml')
+        assert 'image-adjacent-text' not in soup.find('p').get('class', [])
+
+
 # =========================================================================
 # exclude: start 规则测试
 # =========================================================================
@@ -1057,5 +1087,4 @@ class TestNestedPreInParagraphOrInline:
         result = processor.process(article)
         assert "广告" not in result.content
         assert "正文内容" in result.content
-
 
