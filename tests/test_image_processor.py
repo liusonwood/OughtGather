@@ -249,12 +249,14 @@ class TestGenerateFilename:
 class TestDownloadImage:
     """图片下载请求应支持需要 Referer 的 CDN，并保持失败降级。"""
 
+    @patch("src.processors.image_processor.validate_url", return_value=True)
     @patch("src.processors.image_processor.httpx.Client")
-    def test_uses_article_url_as_referer(self, mock_client):
+    def test_uses_article_url_as_referer(self, mock_client, _mock_validate):
         response = MagicMock()
-        response.content = b"image-data"
+        response.headers = {"Content-Length": "10"}
+        response.iter_bytes.return_value = [b"image-data"]
         client = mock_client.return_value.__enter__.return_value
-        client.get.return_value = response
+        client.stream.return_value.__enter__.return_value = response
 
         processor = ImageProcessor()
         result = processor._download_image(
@@ -263,33 +265,77 @@ class TestDownloadImage:
         )
 
         assert result == b"image-data"
-        headers = client.get.call_args.kwargs["headers"]
+        headers = client.stream.call_args.kwargs["headers"]
         assert headers["Referer"] == "https://example.com/articles/1"
         assert headers["Accept"].startswith("image/")
+        mock_client.assert_called_once_with(timeout=8, follow_redirects=False)
 
+    @patch("src.processors.image_processor.validate_url", return_value=True)
     @patch("src.processors.image_processor.httpx.Client")
-    def test_without_base_url_does_not_send_referer(self, mock_client):
+    def test_without_base_url_does_not_send_referer(self, mock_client, _mock_validate):
         response = MagicMock()
-        response.content = b"image-data"
+        response.headers = {"Content-Length": "10"}
+        response.iter_bytes.return_value = [b"image-data"]
         client = mock_client.return_value.__enter__.return_value
-        client.get.return_value = response
+        client.stream.return_value.__enter__.return_value = response
 
         result = ImageProcessor()._download_image("https://cdn.example.com/image.jpg")
 
         assert result == b"image-data"
-        headers = client.get.call_args.kwargs["headers"]
+        headers = client.stream.call_args.kwargs["headers"]
         assert "Referer" not in headers
 
+    @patch("src.processors.image_processor.validate_url", return_value=True)
     @patch("src.processors.image_processor.httpx.Client")
-    def test_403_returns_none(self, mock_client):
+    def test_403_returns_none(self, mock_client, _mock_validate):
         import httpx
 
         url = "https://cdn.example.com/image.jpg"
         response = httpx.Response(403, request=httpx.Request("GET", url))
         client = mock_client.return_value.__enter__.return_value
-        client.get.return_value = response
+        client.stream.return_value.__enter__.return_value = response
 
         assert ImageProcessor()._download_image(url, base_url="https://example.com/article") is None
+
+    @patch("src.processors.image_processor.validate_url", return_value=False)
+    @patch("src.processors.image_processor.httpx.Client")
+    def test_unsafe_url_is_rejected_before_request(self, mock_client, _mock_validate):
+        assert ImageProcessor()._download_image("http://127.0.0.1/image.jpg") is None
+        mock_client.assert_not_called()
+
+    @patch("src.processors.image_processor.validate_url", return_value=True)
+    @patch("src.processors.image_processor.httpx.Client")
+    def test_content_length_limit_is_checked_before_reading(self, mock_client, _mock_validate):
+        response = MagicMock()
+        response.headers = {"Content-Length": str(ImageProcessor.MAX_DOWNLOAD_SIZE + 1)}
+        client = mock_client.return_value.__enter__.return_value
+        client.stream.return_value.__enter__.return_value = response
+
+        assert ImageProcessor()._download_image("https://example.com/image.jpg") is None
+        response.iter_bytes.assert_not_called()
+
+    @patch("src.processors.image_processor.validate_url", return_value=True)
+    @patch("src.processors.image_processor.httpx.Client")
+    def test_streaming_download_limit_handles_missing_content_length(self, mock_client, _mock_validate):
+        response = MagicMock()
+        response.headers = {}
+        response.iter_bytes.return_value = [b"x" * ImageProcessor.MAX_DOWNLOAD_SIZE, b"x"]
+        client = mock_client.return_value.__enter__.return_value
+        client.stream.return_value.__enter__.return_value = response
+
+        assert ImageProcessor()._download_image("https://example.com/image.jpg") is None
+
+    @patch("src.processors.image_processor.validate_url", return_value=True)
+    @patch("src.processors.image_processor.httpx.Client")
+    def test_redirect_response_is_not_followed(self, mock_client, _mock_validate):
+        import httpx
+
+        url = "https://example.com/image.jpg"
+        response = httpx.Response(302, headers={"Location": "http://127.0.0.1/secret"}, request=httpx.Request("GET", url))
+        client = mock_client.return_value.__enter__.return_value
+        client.stream.return_value.__enter__.return_value = response
+
+        assert ImageProcessor()._download_image(url) is None
 
 
 # =========================================================================
