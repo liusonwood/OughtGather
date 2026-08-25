@@ -151,7 +151,7 @@ jobs:
           TESTMAIL_APP_API_KEY: ${{ secrets.TESTMAIL_APP_API_KEY }}
 
         run: |
-          python src/main.py
+          python -u src/main.py
 
       - name: Upload EPUB artifact
         if: always()

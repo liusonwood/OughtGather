@@ -213,8 +213,18 @@ def stop_task_buffer() -> List[Tuple[int, str]]:
 def flush_task_logs(prefix: str, records: List[Tuple[int, str]]):
     """将缓冲的日志记录顺序刷写入全局 Logger，带上统一的源前缀"""
     logger = get_logger()
-    for level, msg in records:
-        logger.log(level, f"[{prefix}] {msg}")
+    try:
+        for level, msg in records:
+            logger.log(level, f"[{prefix}] {msg}")
+    finally:
+        # GitHub Actions 使用非交互式 stdout。logging 的 handler 通常会在
+        # emit 后 flush，但这里显式刷新整个 logger，确保一组任务日志在
+        # 返回主循环前已经交给 Actions 的日志采集器。
+        for handler in logger.handlers:
+            try:
+                handler.flush()
+            except Exception:
+                pass
 
 
 def log_stage(stage_num: int, total_stages: int, title: str):
