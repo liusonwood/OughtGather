@@ -11,11 +11,15 @@ export default {
     if (request.method !== "GET" || url.pathname !== "/") {
       return new Response("Not Found", { status: 404 });
     }
+    if (!env.TRIGGER_SHARED_SECRET ||
+        request.headers.get("X-Worker-Trigger-Secret") !== env.TRIGGER_SHARED_SECRET) {
+      return new Response("Unauthorized", { status: 401 });
+    }
     try {
       await triggerGitHubActions(env);
       return new Response("GitHub Actions trigger sent successfully!", { status: 200 });
     } catch (err) {
-      return new Response(`Error: ${err.message}`, { status: 500 });
+      return new Response("Unable to trigger GitHub Actions", { status: 502 });
     }
   }
 };

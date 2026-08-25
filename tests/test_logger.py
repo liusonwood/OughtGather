@@ -14,6 +14,7 @@ from src.utils.logger import (
     log_banner,
     log_summary_table,
     get_logger,
+    redact_sensitive_text,
 )
 
 
@@ -35,6 +36,17 @@ def test_truncate_url():
     truncated = truncate_url(long_url, max_length=30)
     assert len(truncated) <= 30
     assert "..." in truncated
+
+
+def test_redact_sensitive_text():
+    text = (
+        "https://example.test/?apikey=test-key&namespace=demo "
+        "Authorization: Bearer test-key password=other-secret"
+    )
+    redacted = redact_sensitive_text(text)
+    assert "test-key" not in redacted
+    assert "other-secret" not in redacted
+    assert redacted.count("[REDACTED]") == 3
 
 
 def test_colored_formatter():

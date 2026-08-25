@@ -5,6 +5,7 @@
 
 import logging
 import os
+import re
 import sys
 import threading
 import unicodedata
@@ -14,6 +15,29 @@ from typing import Optional, List, Tuple, Any
 
 # 默认时区：北京时间 UTC+8
 DEFAULT_TZ = ZoneInfo("Asia/Shanghai")
+
+_SENSITIVE_PATTERN = re.compile(
+    r"(?i)(?P<prefix>(?:apikey|api[_-]?key|token|secret|password)\s*[=:]\s*|"
+    r"(?:[?&](?:apikey|api[_-]?key|token|secret|password)=))"
+    r"(?P<value>[^\s&\"']+)"
+)
+_BEARER_PATTERN = re.compile(r"(?i)(Authorization\s*:\s*Bearer\s+)[^\s,]+")
+
+
+def redact_sensitive_text(value: object) -> str:
+    """Remove credentials from log/error text while preserving diagnostics."""
+    text = str(value)
+    text = _SENSITIVE_PATTERN.sub(r"\g<prefix>[REDACTED]", text)
+    return _BEARER_PATTERN.sub(r"\g<1>[REDACTED]", text)
+
+
+class SensitiveDataFilter(logging.Filter):
+    """Redact common credential forms before any handler receives a record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = redact_sensitive_text(record.getMessage())
+        record.args = ()
+        return True
 
 
 def string_width(s: str) -> int:
@@ -167,6 +191,7 @@ class Logger:
         self._logger.setLevel(logging.DEBUG)
 
         if not self._logger.handlers:
+            self._logger.addFilter(SensitiveDataFilter())
             # 1. 任务缓冲 Handler (最高优先级)
             buffer_handler = TaskBufferHandler()
             buffer_handler.setLevel(logging.DEBUG)
