@@ -984,6 +984,9 @@ h2 {
     margin-top: 1em;
     text-align: justify;
 }
+.content p.image-adjacent-text {
+    text-align: left;
+}
 .content img {
     max-width: 100%;
     height: auto;
