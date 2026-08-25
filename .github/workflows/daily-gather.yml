@@ -72,6 +72,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          version: '0.12.5'
           enable-cache: true
           cache-dependency-glob: "requirements.txt"
 
