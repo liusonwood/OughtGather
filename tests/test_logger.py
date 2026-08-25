@@ -74,6 +74,20 @@ def test_task_buffer_filter_suppresses_live_handlers_during_buffer():
     assert TaskBufferFilter().filter(record) is True
 
 
+def test_flush_task_logs_flushes_all_handlers(monkeypatch):
+    logger = get_logger()
+    flushes = []
+
+    for handler in logger.handlers:
+        monkeypatch.setattr(handler, "flush", lambda: flushes.append(True))
+
+    flush_task_logs("rss | example.com", [(logging.INFO, "message")])
+
+    # File/console handlers also flush once per emitted record; the final
+    # explicit flush must still invoke every configured handler.
+    assert len(flushes) >= len(logger.handlers)
+
+
 def test_log_stage_banner_table(caplog):
     with caplog.at_level(logging.INFO):
         log_stage(1, 5, "阶段测试")
