@@ -213,6 +213,38 @@ class TestBaseFetcherMakeRequest:
                     allow_browser_fallback=True,
                 )
 
+    @patch("src.fetchers.base.validate_url", return_value=False)
+    def test_browser_route_blocks_unsafe_destination(self, _mock_validate):
+        fetcher = self._make_fetcher()
+        route = MagicMock()
+        route.request.url = "http://127.0.0.1:8080/internal"
+
+        fetcher._handle_browser_route(route)
+
+        route.abort.assert_called_once_with()
+        route.continue_.assert_not_called()
+
+    @patch("src.fetchers.base.validate_url", return_value=True)
+    def test_browser_route_allows_public_destination(self, _mock_validate):
+        fetcher = self._make_fetcher()
+        route = MagicMock()
+        route.request.url = "https://cdn.example.com/app.js"
+
+        fetcher._handle_browser_route(route)
+
+        route.continue_.assert_called_once_with()
+        route.abort.assert_not_called()
+
+    def test_browser_route_allows_local_browser_resource(self):
+        fetcher = self._make_fetcher()
+        route = MagicMock()
+        route.request.url = "data:text/javascript,console.log(1)"
+
+        fetcher._handle_browser_route(route)
+
+        route.continue_.assert_called_once_with()
+        route.abort.assert_not_called()
+
 
 # =========================================================================
 # RSSFetcher 测试
