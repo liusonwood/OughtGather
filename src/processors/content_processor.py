@@ -994,46 +994,7 @@ class ContentProcessor:
         """
         # 使用 BeautifulSoup 的修复能力
         soup = BeautifulSoup(html, 'lxml')
-
-        # Kindle 在正文使用两端对齐时，偶尔会把紧邻图片前的段落末行也
-        # 拉伸字符间距。为这类段落添加专用 class，由 EPUB CSS 覆盖为左对齐；
-        # 不改变正文文本，也不影响普通段落。
-        self._mark_image_adjacent_paragraphs(soup)
         
         if soup.body:
             return soup.body.decode_contents()
         return str(soup)
-
-    @staticmethod
-    def _mark_image_adjacent_paragraphs(soup: BeautifulSoup) -> None:
-        """标记紧邻图片块之前的段落，避免 Kindle 异常拉伸末行。"""
-        image_container_names = {'figure', 'div', 'section', 'article'}
-
-        def contains_image(tag) -> bool:
-            return tag.name == 'img' or (
-                tag.name in image_container_names and tag.find('img') is not None
-            )
-
-        for paragraph in soup.find_all('p'):
-            # lxml 可能会把原本位于闭合 </p> 后的直接 <img> 合并回同一
-            # 个段落；仅有图片的段落不处理，含有文字的混合段落需要处理。
-            has_inline_image_with_text = (
-                paragraph.find('img') is not None
-                and bool(paragraph.get_text(strip=True))
-            )
-
-            sibling = paragraph.next_sibling
-            while sibling is not None and getattr(sibling, 'name', None) is None:
-                if str(sibling).strip():
-                    break
-                sibling = sibling.next_sibling
-
-            if has_inline_image_with_text or (
-                sibling is not None
-                and getattr(sibling, 'name', None)
-                and contains_image(sibling)
-            ):
-                classes = paragraph.get('class', [])
-                if 'image-adjacent-text' not in classes:
-                    classes.append('image-adjacent-text')
-                    paragraph['class'] = classes
