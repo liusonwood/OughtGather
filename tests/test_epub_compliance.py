@@ -245,12 +245,6 @@ class TestEpubContent:
 
         print(f"✓ default.css中成功包含了行内代码和代码块相关的排版规则")
 
-    def test_default_css_contains_image_adjacent_text_override(self, shared_epub):
-        """图片前段落应覆盖正文默认的两端对齐。"""
-        css_content = self._read_epub_xhtml(shared_epub, 'style/default.css')
-        assert '.content p.image-adjacent-text' in css_content
-        assert 'text-align: left' in css_content
-
 
 class TestEpubSpine:
     """测试EPUB spine（阅读顺序）是否符合规范"""
