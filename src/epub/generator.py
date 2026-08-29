@@ -507,10 +507,14 @@ class EPUBGenerator:
 """
 
         # 添加元信息
+        metadata_lines = []
         if safe_author:
-            content_html += f"<p class='author'>Author/作者: {safe_author}</p>"
+            metadata_lines.append(f"Author/作者: {safe_author}")
         if article.published_date:
-            content_html += f"<p class='date'>Date/日期: {article.published_date}</p>"
+            safe_date = html.escape(str(article.published_date))
+            metadata_lines.append(f"Date/日期: {safe_date}")
+        if metadata_lines:
+            content_html += "<p class='author date'>" + "<br/>".join(metadata_lines) + "</p>"
 
         # 添加正文（正文已经由 ContentProcessor 处理过，应该是安全的 HTML 片段）
         content_html += f"<div class='content'>{article.content}</div>"
@@ -1029,6 +1033,9 @@ h2 {
 .content {
     margin-top: 1em;
     text-align: justify;
+}
+.content p {
+    margin: 0.5em 0;
 }
 .content img {
     max-width: 100%;
