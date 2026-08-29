@@ -12,7 +12,10 @@ def test_imported_type_is_whitelisted_before_rendering():
 
     with sync_playwright() as playwright_api:
         try:
-            browser = playwright_api.chromium.launch()
+            browser = playwright_api.chromium.launch(
+                headless=True,
+                chromium_sandbox=True,
+            )
         except PlaywrightError as exc:
             pytest.skip(f"Chromium is not installed: {exc}")
         page = browser.new_page()
@@ -34,7 +37,10 @@ def test_valid_imported_type_remains_usable():
 
     with sync_playwright() as playwright_api:
         try:
-            browser = playwright_api.chromium.launch()
+            browser = playwright_api.chromium.launch(
+                headless=True,
+                chromium_sandbox=True,
+            )
         except PlaywrightError as exc:
             pytest.skip(f"Chromium is not installed: {exc}")
         page = browser.new_page()

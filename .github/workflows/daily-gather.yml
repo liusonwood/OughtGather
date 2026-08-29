@@ -96,6 +96,12 @@ jobs:
       - name: Install Playwright Chromium
         run: playwright install chromium
 
+      - name: Enable unprivileged user namespaces for Chromium sandbox
+        run: |
+          if sudo sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
       - name: Prepare config.json
         env:
           CONFIG_JSON: ${{ secrets.CONFIG_JSON }}

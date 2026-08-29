@@ -339,6 +339,41 @@ class TestBaseFetcherMakeRequest:
         route.continue_.assert_called_once_with()
         route.abort.assert_not_called()
 
+    def test_browser_launch_enables_sandbox(self):
+        fetcher = self._make_fetcher()
+        mock_sync_playwright = MagicMock()
+        mock_playwright_module = MagicMock()
+        mock_playwright_module.sync_playwright = mock_sync_playwright
+        mock_playwright_ctx = MagicMock()
+        mock_sync_playwright.return_value.start.return_value = mock_playwright_ctx
+        mock_browser = MagicMock()
+        mock_playwright_ctx.chromium.launch.return_value = mock_browser
+        mock_context = MagicMock()
+        mock_browser.new_context.return_value = mock_context
+        mock_page = MagicMock()
+        mock_context.new_page.return_value = mock_page
+        mock_page.content.return_value = "<html><body>Hello</body></html>"
+        mock_page.url = "https://example.com"
+
+        def fake_goto(url, **kwargs):
+            response_mock = MagicMock()
+            response_mock.request.resource_type = "document"
+            response_mock.status = 200
+            for call in mock_page.on.call_args_list:
+                if call[0][0] == "response":
+                    call[0][1](response_mock)
+
+        mock_page.goto.side_effect = fake_goto
+
+        with patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.sync_api": mock_playwright_module}):
+            resp = fetcher._make_browser_request("https://example.com")
+            assert resp.status_code == 200
+            mock_playwright_ctx.chromium.launch.assert_called_once_with(
+                headless=True,
+                chromium_sandbox=True,
+            )
+
+
 
 # =========================================================================
 # RSSFetcher 测试
