@@ -38,6 +38,7 @@ class EPUBGenerator:
         self.image_processor = ImageProcessor()
         self.toc_generator = TOCGenerator()
         self.cover_generator = CoverGenerator(config.title)
+        self.cover_page: Optional[epub.EpubHtml] = None
 
     def generate(
         self,
@@ -72,6 +73,8 @@ class EPUBGenerator:
         # 6. 生成目录数据
         toc = self.toc_generator.generate(sections)
         book.toc = toc
+        # 将 contents.xhtml 设为 NCX 目录首项，防止部分 Kindle 转制路径将 NCX 首项(原为 divider_0)当作正文起点
+        book.toc.insert(0, epub.Link("contents.xhtml", "目录 / Contents", "contents"))
 
         # 初始化 spine
         book.spine = []
@@ -108,19 +111,25 @@ class EPUBGenerator:
 
         if isinstance(book.spine, list):
             book.spine.insert(0, contents)
+            if self.cover_page is not None:
+                book.spine.insert(0, self.cover_page)
         else:
-            book.spine = [contents]
+            book.spine = ([self.cover_page] if self.cover_page is not None else []) + [contents]
 
         # 12. 添加样式
         self._add_style(book)
 
         # 13. 设置 Guide 元素
-        book.guide = [
-            {'href': 'contents.xhtml', 'title': 'Table of Contents', 'type': 'toc'},
-            {'href': 'contents.xhtml', 'title': 'Cover', 'type': 'cover'},
-            {'href': 'contents.xhtml', 'title': 'Table of Contents', 'type': 'text'},
-            {'href': 'contents.xhtml', 'title': 'Start', 'type': 'start'},
+        # 将 toc 指向隐藏的 nav.xhtml，保护 contents.xhtml 不被 Kindle 识别为 frontmatter 跳过；
+        # 将 contents.xhtml 标记为正文起点 (text / start)，cover 指向 cover.xhtml。
+        guide = [
+            {'href': 'nav.xhtml', 'title': 'Table of Contents', 'type': 'toc'},
+            {'href': 'contents.xhtml', 'title': 'Start of Content', 'type': 'text'},
+            {'href': 'contents.xhtml', 'title': 'Start of Content', 'type': 'start'},
         ]
+        if self.cover_page is not None:
+            guide.insert(0, {'href': 'cover.xhtml', 'title': 'Cover', 'type': 'cover'})
+        book.guide = guide
 
         # 14. 保存文件
         output_path = self._save_book(book)
@@ -139,18 +148,49 @@ class EPUBGenerator:
         book.add_author('Ought Gather')
 
     def _add_cover(self, book: epub.EpubBook):
-        """添加封面 (EPUB 3.0 格式)"""
+        """添加封面：manifest 封面图片 + 真实封面页 cover.xhtml (spine 第 1 项，非线性)"""
         try:
             cover_filename, cover_data = self.cover_generator.generate()
 
             # 设置封面图片 (使用 set_cover 确保 properties="cover-image" 被正确设置)
             # ebooklib 会自动处理 manifest 中的 properties
-            # 设置 create_page=False，避免 ebooklib 自动创建可能被错误解析的 XHTML 封面页
             book.set_cover(cover_filename, cover_data, create_page=False)
 
-            self.logger.info("Cover image set in EPUB (no XHTML page)")
+            safe_title = html_module.escape(self.config.title.get_plain_text())
+            cover_page = epub.EpubHtml(
+                title="Cover", file_name="cover.xhtml", uid="cover_page", lang="zh"
+            )
+            cover_page.content = f"""<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh" xml:lang="zh">
+<head>
+    <title>Cover</title>
+    <style type="text/css">
+        html, body {{
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            text-align: center;
+        }}
+        img {{
+            max-width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }}
+    </style>
+</head>
+<body>
+    <img src="{cover_filename}" alt="{safe_title}"/>
+</body>
+</html>"""
+            # 设置为非线性页：Kindle 打开时跳过非线性项，直接进入第一线性页 contents.xhtml
+            cover_page.is_linear = False
+            book.add_item(cover_page)
+            self.cover_page = cover_page
+
+            self.logger.info("Cover image + cover.xhtml (spine non-linear) added")
         except Exception as e:
             self.logger.error(f"Failed to add cover: {e}")
+            self.cover_page = None
 
 
     def _prepare_sections(
@@ -850,19 +890,24 @@ class EPUBGenerator:
         nav_tag_start = f'<nav epub:type="toc" id="toc">' if is_nav else '<div id="toc">'
         nav_tag_end = '</nav>' if is_nav else '</div>'
 
+        body_attrs = 'style="padding: 1em;"' if is_nav else 'style="padding: 1em;" epub:type="bodymatter"'
+
         content = f"""<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh" xml:lang="zh">
 <head>
     <title>{safe_title}</title>
     <link rel="stylesheet" type="text/css" href="style/default.css"/>
 </head>
-<body style="padding: 1em;">
+<body {body_attrs}>
     {nav_tag_start}
         <h1 style="{STYLE_H1}">{rendered_book_title}</h1>
         <ol style="{STYLE_OL}">
 """
         for item in toc:
             if isinstance(item, epub_lib.Link):
+                # 过滤掉目录页自身的自引用链接（该链接用于 NCX 导航首项，在视觉目录中无需重复展示）
+                if item.href == 'contents.xhtml':
+                    continue
                 # 扁平链接（如 summary），使用大章节样式
                 link_html = f'<a class="section-link" href="{item.href}" style="{STYLE_SECTION_LINK}">{ContentProcessor.render_text_with_emojis(item.title)}</a>'
                 if not is_nav:
@@ -892,11 +937,12 @@ class EPUBGenerator:
 
         if is_nav:
             content += """
-    <!-- EPUB 3.0 landmarks: toc + bodymatter 均指向 contents.xhtml -->
+    <!-- EPUB 3.0 landmarks: cover -> cover.xhtml, toc -> nav.xhtml, bodymatter -> contents.xhtml -->
     <!-- Kindle 根据此块决定"打开时跳转到哪里"，hidden 使其不在阅读器目录中显示 -->
     <nav epub:type=\"landmarks\" id=\"landmarks\" hidden=\"\">
         <ol>
-            <li><a epub:type=\"toc\" href=\"contents.xhtml\">Table of Contents / 目录</a></li>
+            <li><a epub:type=\"cover\" href=\"cover.xhtml\">Cover / 封面</a></li>
+            <li><a epub:type=\"toc\" href=\"nav.xhtml\">Table of Contents / 目录</a></li>
             <li><a epub:type=\"bodymatter\" href=\"contents.xhtml\">Start of Content / 开始阅读</a></li>
         </ol>
     </nav>

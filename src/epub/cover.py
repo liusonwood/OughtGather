@@ -41,6 +41,9 @@ class CoverGenerator:
         # 1. 获取背景图片
         background = self._get_background()
 
+        if background.size != (self.WIDTH, self.HEIGHT):
+            background = self._center_cover_crop(background, self.WIDTH, self.HEIGHT)
+
         # 2. 叠加文字
         cover = self._add_text_overlay(background)
 
