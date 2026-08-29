@@ -145,8 +145,13 @@ class CoverGenerator:
                     self.logger.warning(f"Cover image exceeds MAX_COVER_PIXELS")
                     return None
 
-                # 转换为 RGB
-                if img.mode != 'RGB':
+                # 转换为 RGB：对透明/半透明像素，先以白色背景合成
+                if img.mode in ('RGBA', 'LA', 'PA') or 'A' in img.mode or 'transparency' in img.info:
+                    rgba_img = img.convert('RGBA') if img.mode != 'RGBA' else img
+                    white_bg = Image.new('RGB', rgba_img.size, (255, 255, 255))
+                    white_bg.paste(rgba_img, mask=rgba_img.split()[3])
+                    img = white_bg
+                elif img.mode != 'RGB':
                     img = img.convert('RGB')
 
                 # 居中裁剪以适配套封面尺寸（而不是拉伸压缩）

@@ -375,6 +375,41 @@ class TestDownloadAndProcess:
         assert data[:3] == b"\xff\xd8\xff"
 
     @patch.object(ImageProcessor, "_download_image")
+    def test_palette_image_with_transparency_converted_without_warning(self, mock_download, recwarn):
+        """测试带透明度的 Palette (P 模式) 图片能正确转为 RGB 且不产生 UserWarning"""
+        import warnings
+        img = Image.new("P", (200, 200))
+        # 模拟带字节透明度的调色板 PNG
+        img.info["transparency"] = b"\x00" * 10
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        mock_download.return_value = buf.getvalue()
+
+        processor = ImageProcessor()
+        with warnings.catch_warnings(record=True) as recorded_warnings:
+            warnings.simplefilter("always")
+            result = processor.download_and_process("https://example.com/palette_transparent.png")
+
+        assert result is not None
+        _, data = result
+        assert data[:3] == b"\xff\xd8\xff"
+        # 确保没有触发 UserWarning
+        user_warnings = [w for w in recorded_warnings if issubclass(w.category, UserWarning)]
+        assert len(user_warnings) == 0
+
+    @patch.object(ImageProcessor, "_download_image")
+    def test_la_image_converted_to_rgb(self, mock_download):
+        """LA (灰度+透明) 图片转换为 RGB"""
+        mock_download.return_value = _make_image_bytes(200, 200, mode="LA", color=(200, 128), fmt="PNG")
+
+        processor = ImageProcessor()
+        result = processor.download_and_process("https://example.com/img_la.png")
+
+        assert result is not None
+        _, data = result
+        assert data[:3] == b"\xff\xd8\xff"
+
+    @patch.object(ImageProcessor, "_download_image")
     def test_download_failure_returns_none(self, mock_download):
         """下载失败返回 None"""
         mock_download.return_value = None

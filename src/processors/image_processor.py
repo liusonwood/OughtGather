@@ -232,16 +232,11 @@ class ImageProcessor:
                 return None
 
             # 转换为 RGB：对透明/半透明像素，先以白色背景合成
-            if img.mode in ('RGBA', 'LA', 'PA') or 'A' in img.mode:
-                # 创建白色背景
-                white_bg = Image.new('RGB', img.size, (255, 255, 255))
-                if img.mode == 'RGBA':
-                    # 使用 alpha 通道作为蒙版将图片合成到白色背景上
-                    white_bg.paste(img, mask=img.split()[3])
-                else:
-                    # 其他带 alpha 的模式，先转 RGBA 再处理
-                    img = img.convert('RGBA')
-                    white_bg.paste(img, mask=img.split()[3])
+            if img.mode in ('RGBA', 'LA', 'PA') or 'A' in img.mode or 'transparency' in img.info:
+                # 先转为 RGBA 保证透明通道完整（避免 mode P 含透明度时直接转 RGB 触发 UserWarning）
+                rgba_img = img.convert('RGBA') if img.mode != 'RGBA' else img
+                white_bg = Image.new('RGB', rgba_img.size, (255, 255, 255))
+                white_bg.paste(rgba_img, mask=rgba_img.split()[3])
                 img = white_bg
             elif img.mode != 'RGB':
                 img = img.convert('RGB')
