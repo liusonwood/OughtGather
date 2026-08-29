@@ -268,7 +268,9 @@ class TestDownloadImage:
         headers = client.stream.call_args.kwargs["headers"]
         assert headers["Referer"] == "https://example.com/articles/1"
         assert headers["Accept"].startswith("image/")
-        mock_client.assert_called_once_with(timeout=8, follow_redirects=False)
+        mock_client.assert_called_once()
+        assert mock_client.call_args.kwargs["timeout"] == 8
+        assert mock_client.call_args.kwargs["follow_redirects"] is False
 
     @patch("src.processors.image_processor.validate_url", return_value=True)
     @patch("src.processors.image_processor.httpx.Client")

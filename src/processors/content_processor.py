@@ -40,6 +40,12 @@ class ContentProcessor:
         Returns:
             Article: 处理后的文章
         """
+        # 保护：防止超大内容导致内存/CPU耗尽
+        max_bytes = 5 * 1024 * 1024  # 5 MB
+        if article.content and len(article.content.encode('utf-8')) > max_bytes:
+            self.logger.warning(f"Article content exceeds 5MB limit: {article.title}")
+            article.content = article.content[:max_bytes]
+
         # 1. 先清洗 HTML（把段落内的单行 <pre> 转成行内 <code>）。
         # 必须在任何 lxml/BeautifulSoup 解析之前完成：HTML 不允许 <p> 内嵌 <pre>，
         # 解析器会把 <p>text <pre>code</pre> more</p> 拆成 </p><pre>，再转回
@@ -699,6 +705,8 @@ class ContentProcessor:
         for tag in soup.find_all(True):
             if 'style' in tag.attrs:
                 style_str = tag['style']
+                # 移除危险 CSS 函数与指令 (expression, url, behavior, @import, -moz-binding)
+                style_str = re.sub(r'(?i)(expression|url|behavior|@import|-moz-binding)\s*\(.*?\)', '', style_str)
                 # 移除 color 和 background-color 属性
                 new_style = re.sub(r'(?i)\b(background-)?color\s*:[^;]+(;|$)', '', style_str)
                 
@@ -761,11 +769,24 @@ class ContentProcessor:
                     else:  # 空字符串，删除属性
                         del img['height']
 
-        # 3. 移除 SVG 和远程资源标签
-        # SVG 缺少命名空间会导致 EPUB 验证失败
-        # 视频/音频是远程资源，Kindle 不支持
-        for tag in soup(['svg', 'video', 'source', 'audio', 'track']):
+        # 3. 移除 dangerous and remote tags
+        dangerous_tags = [
+            'script', 'style', 'iframe', 'object', 'embed', 'form', 'input',
+            'button', 'textarea', 'select', 'option', 'noscript', 'applet',
+            'frame', 'frameset', 'meta', 'link', 'base', 'svg', 'video',
+            'source', 'audio', 'track', 'canvas', 'map', 'area'
+        ]
+        for tag in soup(dangerous_tags):
             tag.decompose()
+
+        # 3.1 移除具有危险 scheme 的图片
+        for img in list(soup.find_all('img')):
+            src = img.get('src')
+            if src:
+                src_clean = str(src).strip().lower()
+                if src_clean.startswith(('javascript:', 'vbscript:', 'file:', 'blob:')):
+                    img.decompose()
+                    continue
 
         # 3.5. 转换不合法的嵌套 <pre> 标签为行内 <code> 标签
         # 当 <pre> 标签被嵌套在 <p>、<h1>-<h6>、<span>、<a> 等行内/段落元素中时，
@@ -790,12 +811,6 @@ class ContentProcessor:
         # 4.6. 解耦段落中的混排插图，防止插图前文本因 text-align: justify 产生非正常两端对齐拉伸
         self._separate_mixed_images_from_p(soup)
 
-        # === 原有安全规则 ===
-
-        # 移除 script 和 style 标签
-        for tag in soup(['script', 'style', 'iframe', 'form', 'input', 'button', 'noscript']):
-            tag.decompose()
-
         # 移除不安全的属性
         # 保留基本属性和图片处理所需的属性，以及表格/样式属性
         allowed_attrs = [
@@ -808,7 +823,8 @@ class ContentProcessor:
         for tag in soup.find_all(True):
             attrs = dict(tag.attrs)
             for attr in attrs:
-                if attr not in allowed_attrs:
+                # 剔除所有 on* 事件属性 (例如 onclick, onload, onerror)
+                if attr.lower().startswith('on') or attr not in allowed_attrs:
                     del tag[attr]
                 # 限制 width/height 属性只能在 img 标签上保留，防止复杂的表格固定宽度导致挤压
                 elif attr in ('width', 'height') and tag.name != 'img':

@@ -13,6 +13,32 @@ from PIL import Image
 
 from src.utils.logger import get_logger
 from src.utils.safe_url import validate_url
+from src.utils.safe_http import create_safe_client, SafeTransport
+
+# Set Pillow decompression bomb threshold (25 megapixels)
+Image.MAX_IMAGE_PIXELS = 25_000_000
+
+ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP", "GIF"}
+ALLOWED_MIME_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"}
+
+
+def is_valid_image_header(data: bytes) -> bool:
+    """Verify image magic bytes against supported raster formats."""
+    if not data or len(data) < 12:
+        return False
+    # JPEG: starts with \xff\xd8\xff
+    if data.startswith(b"\xff\xd8\xff"):
+        return True
+    # PNG: starts with \x89PNG\r\n\x1a\n
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return True
+    # GIF: starts with GIF87a or GIF89a
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return True
+    # WEBP: starts with RIFF and has WEBP at bytes 8-12
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return True
+    return False
 
 
 class ImageProcessor:
@@ -22,6 +48,7 @@ class ImageProcessor:
     MAX_WIDTH = 1200  # 最大宽度 - 适配 modern Kindle (300 ppi) 和大屏阅读器
     MAX_HEIGHT = 1800  # 最大高度 - 适配常见阅读器视口
     MAX_DOWNLOAD_SIZE = 10 * 1024 * 1024  # 单张图片原始响应最大 10 MB
+    MAX_IMAGE_PIXELS = 25_000_000  # 最大解压像素数 (25 MP)
     JPEG_QUALITY = 88  # JPEG 质量 - 提高以获得更清晰的图片
     MIN_WIDTH = 120  # 最小宽度（过滤头像、图标、表情等装饰性小图）
     MIN_HEIGHT = 120  # 最小高度
@@ -122,16 +149,24 @@ class ImageProcessor:
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/120.0.0.0 Safari/537.36"
                 ),
-                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                "Accept": "image/jpeg,image/png,image/webp,image/gif;q=0.9,*/*;q=0.1",
             }
             if base_url:
                 parsed_base_url = urlparse(base_url)
                 if parsed_base_url.scheme in ("http", "https") and parsed_base_url.netloc:
                     headers["Referer"] = base_url
 
-            with httpx.Client(timeout=8, follow_redirects=False) as client:
+            # Use SafeTransport for SSRF & DNS rebinding protection
+            with httpx.Client(timeout=8, follow_redirects=False, transport=SafeTransport()) as client:
                 with client.stream("GET", url, headers=headers) as response:
                     response.raise_for_status()
+
+                    # Verify Content-Type if present
+                    content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                    if content_type:
+                        if content_type in ("image/svg+xml", "text/html", "text/plain", "application/xhtml+xml"):
+                            self.logger.warning(f"Rejected unsupported image Content-Type '{content_type}': {url}")
+                            return None
 
                     content_length = response.headers.get("Content-Length")
                     if content_length:
@@ -168,11 +203,30 @@ class ImageProcessor:
             Tuple[str, bytes]: (文件名, 处理后的图片数据)
         """
         try:
-            # 打开图片
-            img = Image.open(io.BytesIO(image_data))
+            # 校验魔数 (Magic Bytes)
+            if not is_valid_image_header(image_data):
+                self.logger.warning(f"Invalid image magic bytes/format: {original_url}")
+                return None
+
+            # 打开图片并校验格式与解压像素
+            try:
+                img = Image.open(io.BytesIO(image_data))
+            except (Image.DecompressionBombError, Image.DecompressionBombWarning) as e:
+                self.logger.warning(f"Decompression bomb rejected for image {original_url}: {e}")
+                return None
+
+            if img.format not in ALLOWED_IMAGE_FORMATS:
+                self.logger.warning(f"Disallowed image format '{img.format}': {original_url}")
+                return None
+
+            width, height = img.size
+            if (width * height) > self.MAX_IMAGE_PIXELS:
+                self.logger.warning(
+                    f"Image dimensions ({width}x{height} = {width*height} px) exceed MAX_IMAGE_PIXELS ({self.MAX_IMAGE_PIXELS}): {original_url}"
+                )
+                return None
 
             # 跳过过小的图片（头像、图标、表情等装饰性小图）
-            width, height = img.size
             if width < self.MIN_WIDTH or height < self.MIN_HEIGHT:
                 self.logger.debug(f"Skipping small image ({width}x{height}): {original_url}")
                 return None
@@ -203,6 +257,9 @@ class ImageProcessor:
 
             return (filename, compressed_data)
 
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning) as e:
+            self.logger.warning(f"Decompression bomb detected: {e}")
+            return None
         except Exception as e:
             self.logger.error(f"Failed to process image: {e}")
             return None

@@ -12,6 +12,11 @@ import httpx
 
 from src.config import TitleConfig
 from src.utils.logger import get_logger
+from src.utils.safe_http import create_safe_client, safe_request
+from src.utils.safe_url import validate_url
+
+ALLOWED_COVER_FORMATS = {"JPEG", "PNG", "WEBP"}
+MAX_COVER_PIXELS = 25_000_000
 
 
 class CoverGenerator:
@@ -88,10 +93,8 @@ class CoverGenerator:
             # Bing API
             api_url = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=zh-CN"
 
-            with httpx.Client(timeout=30, follow_redirects=True) as client:
-                # 获取 JSON 数据
-                response = client.get(api_url)
-                response.raise_for_status()
+            with create_safe_client(timeout=30) as client:
+                response = safe_request(client, "GET", api_url)
                 data = response.json()
 
                 # 提取图片 URL
@@ -118,14 +121,29 @@ class CoverGenerator:
             Optional[Image.Image]: 图片对象
         """
         try:
+            if not validate_url(url):
+                self.logger.warning(f"Blocked unsafe cover image URL: {url}")
+                return None
+
             headers = {"User-Agent": "OughtGather/1.0"}
 
-            with httpx.Client(timeout=30, follow_redirects=True) as client:
-                response = client.get(url, headers=headers)
-                response.raise_for_status()
+            with create_safe_client(timeout=30) as client:
+                response = safe_request(client, "GET", url, headers=headers, max_response_bytes=10 * 1024 * 1024)
 
                 # 打开图片
-                img = Image.open(io.BytesIO(response.content))
+                try:
+                    img = Image.open(io.BytesIO(response.content))
+                except (Image.DecompressionBombError, Image.DecompressionBombWarning) as e:
+                    self.logger.warning(f"Decompression bomb rejected in cover image: {e}")
+                    return None
+
+                if img.format not in ALLOWED_COVER_FORMATS:
+                    self.logger.warning(f"Disallowed cover image format '{img.format}'")
+                    return None
+
+                if (img.width * img.height) > MAX_COVER_PIXELS:
+                    self.logger.warning(f"Cover image exceeds MAX_COVER_PIXELS")
+                    return None
 
                 # 转换为 RGB
                 if img.mode != 'RGB':
