@@ -102,7 +102,7 @@ class DedupTracker:
                 stats = self._pending_snapshot_stats[source_key]
                 self._session_snapshot_added += stats["added"]
                 self._session_snapshot_removed += stats["removed"]
-                self.logger.info(
+                self.logger.debug(
                     f"去重快照变化: source={source_key}, "
                     f"上次={stats['previous']} 条, 本次={stats['current']} 条, "
                     f"新增={stats['added']} 条, 移除={stats['removed']} 条, "
