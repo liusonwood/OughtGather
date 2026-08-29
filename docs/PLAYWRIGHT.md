@@ -63,7 +63,8 @@ daily workflow 的安装顺序：
 
 1. 从 Actions cache 恢复 `~/.cache/ms-playwright`；
 2. 缓存未命中时执行 `playwright install-deps chromium`，安装 Ubuntu 系统依赖；
-3. 执行 `playwright install chromium`，安装或校验 Chromium 浏览器文件。
+3. 执行 `playwright install chromium`，安装或校验 Chromium 浏览器文件；
+4. 若系统限制未特权用户命名空间（Ubuntu 23.10+ / 24.04+），执行 `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` 以支持 Chromium Sandbox。
 
 浏览器二进制可以缓存，但 Actions runner 的系统包状态不会被该缓存持久化。因此系统依赖只在浏览器缓存未命中时安装，以减少后续运行时间；如果 GitHub runner 基础镜像发生重大变化，应删除旧缓存或更新缓存键后重新运行。
 
