@@ -1058,4 +1058,41 @@ class TestNestedPreInParagraphOrInline:
         assert "广告" not in result.content
         assert "正文内容" in result.content
 
+    def test_standalone_image_after_p_not_swallowed(self):
+        """测试段落后方的独立 <img> 标签不会被误合入前面的 <p> 标签中"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = (
+            '<p>8 月 24 日，小米发布玄戒家族新一代芯片产品玄戒 O3、玄戒 O100、玄戒 D100。</p>'
+            '<img src="https://example.com/chip.png"/>'
+            '<p>玄戒 O3 定义为 AI 旗舰 SoC。</p>'
+        )
+        article = _make_article(html)
+        result = processor.process(article)
+        # 验证 img 标签没有被吸收进前面的 p 标签
+        assert '<p>8 月 24 日，小米发布玄戒家族新一代芯片产品玄戒 O3、玄戒 O100、玄戒 D100。</p>' in result.content
+        assert '<p>玄戒 O3 定义为 AI 旗舰 SoC。</p>' in result.content
+        assert '<p>8 月 24 日，小米发布玄戒家族新一代芯片产品玄戒 O3、玄戒 O100、玄戒 D100。<img' not in result.content
+
+    def test_mixed_text_and_image_in_p_separated(self):
+        """测试 <p> 内混排的非 Emoji 插图与文本会被拆解为独立段落"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = '<p>前置文本介绍<img src="https://example.com/figure.png"/>后置文本说明</p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        assert '<p>前置文本介绍</p>' in result.content
+        assert '<p><img src="https://example.com/figure.png"/></p>' in result.content
+        assert '<p>后置文本说明</p>' in result.content
+
+    def test_p_containing_only_image_preserved(self):
+        """测试仅包含 <img> 的段落 <p> 不会被过度处理"""
+        source = ContentSource(type="web", src="https://example.com")
+        processor = ContentProcessor(source)
+        html = '<p><img src="https://example.com/only.png"/></p>'
+        article = _make_article(html)
+        result = processor.process(article)
+        assert '<p><img src="https://example.com/only.png"/></p>' in result.content
+
+
 
