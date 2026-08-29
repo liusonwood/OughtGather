@@ -7,7 +7,7 @@ import html as html_module
 import re
 import warnings
 from typing import Optional
-from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
+from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning, NavigableString, Tag
 
 # 过滤掉 BeautifulSoup 的 "输入内容看起来像 URL 而非 HTML" 警告（因为我们在处理纯文本中的 Emoji 时，不可避免会解析 URL 标题或文本）
 warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
@@ -1083,6 +1083,45 @@ class ContentProcessor:
         """
         # 使用 BeautifulSoup 的修复能力
         soup = BeautifulSoup(html, 'lxml')
+
+        # 内容源有时会同时用 </p> 和 <br> 表示段落换行，形成
+        # <p>第一段</p><br/><p>第二段</p>。这会让阅读器把段落外边距和
+        # 强制换行叠加，导致段间距异常增大。仅移除段落元素之间的冗余
+        # <br>，保留段落内部的 <br>，避免破坏正文中的正常强制换行。
+        block_names = {'p', 'div', 'section', 'article', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}
+        redundant_breaks = []
+        for parent in soup.find_all(True):
+            children = list(parent.children)
+            for index, child in enumerate(children):
+                if not isinstance(child, Tag) or child.name != 'br':
+                    continue
+
+                previous = next(
+                    (node for node in reversed(children[:index])
+                     if not (
+                         (isinstance(node, NavigableString) and not str(node).strip())
+                         or (isinstance(node, Tag) and node.name == 'br')
+                     )),
+                    None,
+                )
+                following = next(
+                    (node for node in children[index + 1:]
+                     if not (
+                         (isinstance(node, NavigableString) and not str(node).strip())
+                         or (isinstance(node, Tag) and node.name == 'br')
+                     )),
+                    None,
+                )
+                if (
+                    isinstance(previous, Tag)
+                    and previous.name == 'p'
+                    and isinstance(following, Tag)
+                    and following.name in block_names
+                ):
+                    redundant_breaks.append(child)
+
+        for child in redundant_breaks:
+            child.decompose()
         
         if soup.body:
             return soup.body.decode_contents()
