@@ -189,8 +189,8 @@ class TestEpubContent:
         # 验证 landmarks 内部包含 cover, toc 和 bodymatter 条目
         assert 'epub:type="cover" href="cover.xhtml"' in nav_html, \
             "landmarks应包含epub:type='cover'指向cover.xhtml"
-        assert 'epub:type="toc" href="nav.xhtml"' in nav_html, \
-            "landmarks应包含epub:type='toc'指向nav.xhtml"
+        assert 'epub:type="toc" href="contents.xhtml"' in nav_html, \
+            "landmarks应包含epub:type='toc'指向contents.xhtml"
         assert 'epub:type="bodymatter" href="contents.xhtml"' in nav_html, \
             "landmarks应包含epub:type='bodymatter'指向contents.xhtml（Kindle打开时落在目录页）"
 

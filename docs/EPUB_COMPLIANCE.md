@@ -448,20 +448,21 @@ book.guide = [
     ...
 </nav>
 
-<!-- EPUB 3.0 landmarks: toc + bodymatter 均指向 nav.xhtml -->
+<!-- EPUB 3.0 landmarks: cover -> cover.xhtml, toc + bodymatter 均指向 contents.xhtml -->
 <!-- Kindle 根据此块决定"打开时跳转到哪里"，hidden 使其不在阅读器目录中显示 -->
 <nav epub:type="landmarks" id="landmarks" hidden="">
     <ol>
-        <li><a epub:type="toc" href="nav.xhtml">Table of Contents</a></li>
-        <li><a epub:type="bodymatter" href="nav.xhtml">Start of Content</a></li>
+        <li><a epub:type="cover" href="cover.xhtml">Cover / 封面</a></li>
+        <li><a epub:type="toc" href="contents.xhtml">Table of Contents / 目录</a></li>
+        <li><a epub:type="bodymatter" href="contents.xhtml">Start of Content / 开始阅读</a></li>
     </ol>
 </nav>
 ```
 
 **关键设计决策**：
-- `epub:type="bodymatter"` 指向 `nav.xhtml`（而非第一篇正文），这样 Kindle 认为"正文起始 = 目录页"。
+- `epub:type="bodymatter"` 和 `epub:type="toc"` 指向 `contents.xhtml`（而非非线性未入 spine 的 `nav.xhtml`），符合 EPUB 3.0 / 3.3 规范（landmarks 内资源必须属于 spine item），同时让 Kindle 认为"正文起始 = 目录页"。
 - `hidden=""` 是 EPUB 3.0 规范要求的属性，表示此导航块不在阅读器 UI 的目录列表中展示，但仍被解析器读取生效。
-- 两个 landmark 都指向同一个文件，确保无论 Kindle 读哪个 landmark 都落在目录。
+- 两个 landmark 都指向同一个物理目录页文件，确保无论 Kindle 读哪个 landmark 都落在目录。
 
 ---
 
@@ -480,8 +481,9 @@ unzip -p your_epub.epub EPUB/content.opf | grep 'type="start"'
 ```xml
 <nav epub:type="landmarks" id="landmarks" hidden="">
     <ol>
-        <li><a epub:type="toc" href="nav.xhtml">Table of Contents</a></li>
-        <li><a epub:type="bodymatter" href="nav.xhtml">Start of Content</a></li>
+        <li><a epub:type="cover" href="cover.xhtml">Cover / 封面</a></li>
+        <li><a epub:type="toc" href="contents.xhtml">Table of Contents / 目录</a></li>
+        <li><a epub:type="bodymatter" href="contents.xhtml">Start of Content / 开始阅读</a></li>
     </ol>
 </nav>
 ```
