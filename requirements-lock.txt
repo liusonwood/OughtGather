@@ -1,0 +1,29 @@
+# Reproducible pinned dependencies for OughtGather
+# Generated for Python 3.11
+beautifulsoup4==4.15.0
+certifi==2026.5.20
+charset-normalizer==3.4.7
+courlan==1.4.0
+dateparser==1.4.0
+EbookLib==0.20
+feedparser==6.0.12
+htmldate==1.10.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.18
+jusText==3.0.2
+lxml==6.1.1
+lxml_html_clean==0.4.5
+Markdown==3.10.2
+pillow==12.2.0
+playwright==1.40.0
+python-dateutil==2.9.0.post0
+pytz==2025.2
+regex==2026.5.9
+six==1.17.0
+soupsieve==2.8.4
+tld==0.13.2
+trafilatura==2.1.0
+tzdata==2025.2
+tzlocal==5.3.1
+urllib3==2.5.0

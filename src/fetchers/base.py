@@ -15,6 +15,7 @@ import trafilatura
 from src.config import ContentSource
 from src.utils.logger import get_logger
 from src.utils.safe_url import validate_url
+from src.utils.safe_http import create_safe_client, SafeTransport
 
 
 @dataclass
@@ -297,7 +298,7 @@ class BaseFetcher(ABC):
 
         if not hasattr(self, '_client') or self._client is None or self._client.is_closed:
             limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
-            self._client = httpx.Client(timeout=timeout, follow_redirects=False, limits=limits)
+            self._client = create_safe_client(timeout=timeout, follow_redirects=False, limits=limits)
 
         response = self._client.request(
             method,
@@ -493,12 +494,18 @@ class BaseFetcher(ABC):
 
         Playwright follows redirects internally. Validating every request at
         the route layer ensures a redirect cannot bypass the initial URL
-        check. Data/blob URLs are local browser resources and do not create a
-        network connection, so they remain allowed.
+        check. Enforces an explicit protocol allowlist (http/https only).
         """
         request_url = route.request.url
         if request_url.startswith(("data:", "blob:", "about:blank")):
             route.continue_()
+            return
+
+        from urllib.parse import urlparse
+        parsed = urlparse(request_url)
+        if parsed.scheme.lower() not in ("http", "https"):
+            self.logger.warning(f"Blocked non-HTTP Playwright request protocol: {request_url}")
+            route.abort()
             return
 
         if validate_url(request_url):
