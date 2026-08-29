@@ -787,6 +787,9 @@ class ContentProcessor:
         # 4.5. 把被解析器拆出段落的行内 <code> 等重新合并回前一个 <p>/<h*>
         self._rejoin_split_phrasing(soup)
 
+        # 4.6. 解耦段落中的混排插图，防止插图前文本因 text-align: justify 产生非正常两端对齐拉伸
+        self._separate_mixed_images_from_p(soup)
+
         # === 原有安全规则 ===
 
         # 移除 script 和 style 标签
@@ -920,7 +923,7 @@ class ContentProcessor:
         from bs4 import NavigableString, Tag
 
         inline_tags = {
-            'a', 'abbr', 'b', 'br', 'cite', 'code', 'del', 'em', 'i', 'img',
+            'a', 'abbr', 'b', 'cite', 'code', 'del', 'em', 'i',
             'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub',
             'sup', 'u', 'var', 'time',
         }
@@ -980,6 +983,76 @@ class ContentProcessor:
             else:
                 flush_run()
         flush_run()
+
+    def _separate_mixed_images_from_p(self, soup: BeautifulSoup) -> None:
+        """
+        将与文本混排在同一个 <p> 中的非 Emoji 插图拆解为独立段落。
+
+        当正文插图与文本混在同一个 <p> 标签内（例如 <p>段落文本<img/></p>）时，
+        在 EPUB 阅读器中因应用 text-align: justify 样式，图片上一行的文本会被误判为
+        段落中间行而强制拉伸两端对齐产生巨大字符间距。
+        将非 Emoji 图片从混排段落中拆分出来，使其作为独立段落排版。
+        """
+        from bs4 import NavigableString, Tag
+
+        for p in list(soup.find_all('p')):
+            imgs = [img for img in p.find_all('img') if not (img.get('class') and 'emoji' in img.get('class'))]
+            if not imgs:
+                continue
+
+            # 检查 <p> 中除该插图外是否还有实质性的其它内容（文本或其他标签）
+            has_other_content = False
+            for child in p.contents:
+                if isinstance(child, NavigableString):
+                    if str(child).strip():
+                        has_other_content = True
+                        break
+                elif isinstance(child, Tag):
+                    if child.name != 'img' or (child.get('class') and 'emoji' in child.get('class')):
+                        has_other_content = True
+                        break
+
+            if not has_other_content:
+                # 仅包含该图片本身（或纯空白），本身就是独立的图片包装段落，保持不变
+                continue
+
+            # 将 <p> 内容按插图切分成多个节点序列
+            new_nodes = []
+            current_run = []
+
+            def flush_run():
+                if not current_run:
+                    return
+                # 检查 current_run 是否包含实质内容（非纯空白且非仅有 <br>）
+                has_text = any(
+                    (isinstance(n, NavigableString) and str(n).strip()) or
+                    (isinstance(n, Tag) and n.name != 'br')
+                    for n in current_run
+                )
+                if has_text:
+                    new_p = soup.new_tag('p')
+                    for n in current_run:
+                        new_p.append(n)
+                    new_nodes.append(new_p)
+                current_run.clear()
+
+            for child in list(p.contents):
+                if isinstance(child, Tag) and child.name == 'img' and not (child.get('class') and 'emoji' in child.get('class')):
+                    flush_run()
+                    img_p = soup.new_tag('p')
+                    img_p.append(child)
+                    new_nodes.append(img_p)
+                else:
+                    current_run.append(child)
+            flush_run()
+
+            if new_nodes:
+                first = new_nodes[0]
+                p.replace_with(first)
+                prev = first
+                for node in new_nodes[1:]:
+                    prev.insert_after(node)
+                    prev = node
 
     def _ensure_valid_html(self, html: str) -> str:
         """
