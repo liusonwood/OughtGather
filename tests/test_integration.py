@@ -477,8 +477,9 @@ class TestSectionDividers:
         try:
             spine = self._get_spine_order(epub_path)
 
-            # 验证分隔页顺序：toc → divider_0 → chapter_0 → divider_1 → chapter_1 → summary
+            # 验证分隔页顺序：cover → toc → divider_0 → chapter_0 → divider_1 → chapter_1 → summary
             expected_order = [
+                'cover.xhtml',
                 'contents.xhtml',
                 'divider_0.xhtml', 'chapter_0.xhtml',
                 'divider_1.xhtml', 'chapter_1.xhtml',
@@ -511,8 +512,9 @@ class TestSectionDividers:
             chapter_files = [f for f in spine if f.startswith('chapter_')]
             assert len(chapter_files) == 3, f"应有 3 个文章章节，实际：{chapter_files}"
 
-            # spine 顺序：toc → divider_0 → chapter_0 → chapter_1 → chapter_2 → summary
+            # spine 顺序：cover → toc → divider_0 → chapter_0 → chapter_1 → chapter_2 → summary
             expected = [
+                'cover.xhtml',
                 'contents.xhtml', 'divider_0.xhtml',
                 'chapter_0.xhtml', 'chapter_1.xhtml', 'chapter_2.xhtml',
                 'summary.xhtml',

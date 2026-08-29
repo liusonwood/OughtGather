@@ -225,12 +225,12 @@ def mock_cover_generator_network(monkeypatch):
     from src.epub.cover import CoverGenerator
 
     def mock_fetch_bing_wallpaper(self):
-        # 返回一个简单的 640x960 纯色 PIL Image
-        return Image.new('RGB', (640, 960), color=(240, 240, 240))
+        # 返回一个简单的 WIDTH x HEIGHT 纯色 PIL Image
+        return Image.new('RGB', (CoverGenerator.WIDTH, CoverGenerator.HEIGHT), color=(240, 240, 240))
 
     def mock_download_image(self, url):
-        # 同样返回一个简单的 640x960 纯色 PIL Image
-        return Image.new('RGB', (640, 960), color=(220, 220, 220))
+        # 同样返回一个简单的 WIDTH x HEIGHT 纯色 PIL Image
+        return Image.new('RGB', (CoverGenerator.WIDTH, CoverGenerator.HEIGHT), color=(220, 220, 220))
 
     monkeypatch.setattr(CoverGenerator, "_fetch_bing_wallpaper", mock_fetch_bing_wallpaper)
     monkeypatch.setattr(CoverGenerator, "_download_image", mock_download_image)
