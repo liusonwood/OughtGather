@@ -772,8 +772,7 @@ class EPUBGenerator:
         }}
         .intro-text {{
             line-height: 1.6;
-            text-indent: 2em;
-            margin-bottom: 1em;
+            margin-bottom: 0.8em;
             color: #333333;
         }}
     </style>
@@ -785,11 +784,11 @@ class EPUBGenerator:
 
     <div class="card">
         <div class=\"card-title\"><span class=\"emoji\">ℹ️</span> About / 关于 Ought Gather</div>
-        <p class=\"intro-text\">Automated information aggregator delivering custom RSS, web articles, and newsletters to your Kindle as daily EPUBs
-        <br>自动化信息聚合工具，支持将 RSS、网页、邮件等定时打包为 EPUB 推送至 Kindle。</p>
-        <p class=\"intro-text\">For configuration or contribution, please visit the GitHub repository or use <code>config-editor.html</code>.<br>
-        想要添加或修改内容源、查看系统说明或贡献代码，请访问 GitHub 项目主页，或使用内置的配置编辑器 <code>config-editor.html</code> 进行可视化管理。</p>
-        <p class=\"intro-text\">GitHub: <a href=\"https://github.com/liusonwood/oughtgather\">https://github.com/liusonwood/oughtgather</a></p>
+        <p class=\"intro-text\"><b>Automated information aggregator</b> delivering custom RSS, web articles, and newsletters to your Kindle as daily EPUBs<br>
+        <b>自动化信息聚合工具</b>，支持将 RSS、网页、邮件等定时打包为 EPUB 推送至 Kindle。</p>
+        <p class=\"intro-text\">For configuration or contribution, please visit the <b>GitHub repository</b> or use <code>config-editor.html</code>.<br>
+        想要添加或修改内容源、查看系统说明或贡献代码，请访问 <b>GitHub 项目主页</b>，或使用内置的配置编辑器 <code>config-editor.html</code> 进行可视化管理。</p>
+        <p class=\"intro-text\"><b>GitHub:</b> <a href=\"https://github.com/liusonwood/oughtgather\">https://github.com/liusonwood/oughtgather</a></p>
     </div>
     
     <div class="card">
