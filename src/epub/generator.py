@@ -1035,7 +1035,7 @@ h2 {
     text-align: justify;
 }
 .content p {
-    margin: 0.5em 0;
+    margin: 0.4em 0;
 }
 .content img {
     max-width: 100%;
