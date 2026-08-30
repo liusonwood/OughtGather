@@ -20,6 +20,7 @@ BASE_SECRETS = {
     "WEBDAV_PASSWORD":  "WebDAV 密码",
     "WEBDAV_REMOTE_PATH": "远程存储路径，默认 `/`",
     "CONFIG_JSON":      "完整的 `config.json` 字符串；优先级高于项目根目录的 `config.json` 文件。推荐在 GitHub Actions 中使用，可避免将私有内容源写入仓库",
+    "EPUB_LANGUAGE":    "可选 EPUB/Bing locale，例如 `en-US` 或 `zh-CN`；未设置或无效时使用英文 `en-US`",
 }
 
 
