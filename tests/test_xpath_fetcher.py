@@ -352,3 +352,54 @@ class TestXPathListAutoFetcher:
         assert result.success is False
         assert "List page request error!" in result.error
         assert len(result.articles) == 0
+
+    @patch.object(XPathListAutoFetcher, "_make_request")
+    def test_fetch_list_normalizes_and_deduplicates_links(self, mock_request):
+        mock_request.return_value = MagicMock(content=b"<html/>")
+        tree = MagicMock()
+        link_node = MagicMock()
+        link_node.get.return_value = " /node "
+        text_node = MagicMock(spec=["text"])
+        text_node.text = " /text "
+        tree.xpath.return_value = [" /first ", link_node, text_node, "/first", ""]
+        source = ContentSource(
+            type="xpath_list_auto", src="https://example.com/list",
+            metadata={"list_xpath": "//a/@href"},
+        )
+        fetcher = XPathListAutoFetcher(source)
+        with patch("src.fetchers.xpath_fetcher.lxml_html.fromstring", return_value=tree):
+            result = fetcher.fetch_list()
+        assert result == [
+            {"url": "https://example.com/first"},
+            {"url": "https://example.com/node"},
+            {"url": "https://example.com/text"},
+        ]
+
+    def test_fetch_list_missing_xpath_returns_none(self):
+        fetcher = XPathListAutoFetcher(ContentSource(type="xpath_list_auto", src="https://example.com"))
+        assert fetcher.fetch_list() is None
+
+    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata")
+    @patch.object(XPathListAutoFetcher, "_fetch_full_text")
+    def test_fetch_items_metadata_and_empty_raw_html(self, mock_fetch, mock_meta):
+        class Meta:
+            title = "Metadata title"
+            author = "Author"
+            date = "2026-08-01"
+
+        mock_meta.return_value = Meta()
+        mock_fetch.return_value = ("<p>body</p>", "<html><body>raw</body></html>")
+        fetcher = XPathListAutoFetcher(ContentSource(type="xpath_list_auto", src="https://example.com"))
+        result = fetcher.fetch_items([{"url": "https://example.com/article"}])
+        assert result.success is True
+        assert result.articles[0].title == "Metadata title"
+        assert result.articles[0].author == "Author"
+        assert result.articles[0].published_date == "2026-08-01"
+
+    @patch.object(XPathListAutoFetcher, "_fetch_full_text", return_value=("", ""))
+    def test_fetch_items_empty_content_still_returns_article(self, mock_fetch):
+        fetcher = XPathListAutoFetcher(ContentSource(type="xpath_list_auto", src="https://example.com"))
+        result = fetcher.fetch_items([{"url": "https://example.com/article"}])
+        assert result.success is True
+        assert result.articles[0].title == "Untitled"
+        assert result.articles[0].content == ""

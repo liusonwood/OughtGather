@@ -624,6 +624,67 @@ class TestRSSFetcher:
         # 验证返回全部 10 条
         assert len(result.articles) == 10
 
+    @patch("src.fetchers.rss_fetcher.feedparser.parse")
+    def test_fetch_list_filters_deleted_entries_and_caches_title(self, mock_parse):
+        mock_feed = MagicMock(bozo=False, feed={"title": "Cached feed"})
+        mock_feed.entries = [
+            _make_feedparser_dict({"title": "Keep", "link": "https://example.com/1", "author": "A", "published": "today"}),
+            _make_feedparser_dict({"title": "blocked item", "link": "https://example.com/2"}),
+        ]
+        mock_parse.return_value = mock_feed
+        source = ContentSource(type="rss", src="https://example.com/rss", delete="blocked")
+        fetcher = RSSFetcher(source)
+        candidates = fetcher.fetch_list()
+        assert len(candidates) == 1
+        assert candidates[0]["url"] == "https://example.com/1"
+        assert candidates[0]["_entry"]["title"] == "Keep"
+        assert fetcher._cached_source_title == "Cached feed"
+
+    @patch("src.fetchers.rss_fetcher.feedparser.parse")
+    def test_fetch_list_failure_returns_none(self, mock_parse):
+        mock_parse.side_effect = ValueError("invalid feed")
+        fetcher = RSSFetcher(ContentSource(type="rss", src="https://example.com/rss"))
+        assert fetcher.fetch_list() is None
+
+    def test_fetch_items_handles_entry_error_and_empty_candidates(self, rss_source):
+        fetcher = RSSFetcher(rss_source)
+        assert fetcher.fetch_items([]).articles == []
+        with patch.object(fetcher, "_parse_entry", side_effect=ValueError("bad entry")):
+            result = fetcher.fetch_items([{"_entry": {}}])
+        # FetchResult defaults to success; entry-level failures are reported
+        # through error_count/error while successfully parsed entries remain usable.
+        assert result.success is True
+        assert result.error_count == 1
+        assert "bad entry" in result.error
+
+    def test_parse_entry_returns_none_without_content(self, rss_source):
+        fetcher = RSSFetcher(rss_source)
+        entry = _make_feedparser_dict({"title": "Empty", "link": "https://example.com"})
+        assert fetcher._parse_entry(entry) is None
+
+    def test_parse_entry_uses_description_and_extracts_images(self, rss_source):
+        fetcher = RSSFetcher(rss_source)
+        entry = _make_feedparser_dict({
+            "title": "Images", "link": "https://example.com/post",
+            "description": '<img src="/a.jpg"><p>Text</p>', "tags": [{"term": "news"}],
+        })
+        with patch.object(fetcher, "_extract_images", return_value=["https://example.com/a.jpg"]) as extract:
+            article = fetcher._parse_entry(entry)
+        assert article.content.startswith("<img")
+        assert article.images == ["https://example.com/a.jpg"]
+        assert article.metadata["categories"] == [{"term": "news"}]
+        extract.assert_called_once()
+
+    def test_parse_entry_full_text_merges_og_and_body_images(self, rss_full_text_source):
+        fetcher = RSSFetcher(rss_full_text_source)
+        entry = _make_feedparser_dict({"title": "Full", "link": "https://example.com/post", "summary": "fallback"})
+        with patch.object(fetcher, "_fetch_full_text", return_value=("<p>full</p>", "<meta>raw</meta>")), \
+             patch.object(fetcher, "_extract_og_image", return_value=["og.jpg"]), \
+             patch.object(fetcher, "_extract_images", return_value=["og.jpg", "body.jpg"]):
+            article = fetcher._parse_entry(entry)
+        assert article.content == "<p>full</p>"
+        assert article.images == ["og.jpg", "body.jpg"]
+
 
 class TestTrendingFetcher:
     """TrendingFetcher 测试"""
