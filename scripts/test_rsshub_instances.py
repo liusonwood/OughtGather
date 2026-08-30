@@ -77,6 +77,12 @@ def test_rsshub(host: str, channel_id: str, verbose: bool = False) -> dict:
             "url": url
         }
 
+
+# This is a command-line helper, not a pytest test.  Keep the descriptive
+# function name while preventing pytest from treating its arguments as
+# fixtures during repository-wide test discovery.
+test_rsshub.__test__ = False
+
 def main():
     parser = argparse.ArgumentParser(description="RSSHub Telegram 频道实例测试脚本")
     # 设置 nargs='?' 并提供 default='tnews365'
