@@ -395,79 +395,11 @@ class EPUBGenerator:
         # 3. 顺序更新每个章节的 HTML 并组装电子书
         self.logger.info("Updating image references sequentially and adding images to book...")
         for chapter, article, source in chapters_to_process:
-            if not chapter.content:
-                continue
-                
-            soup = BeautifulSoup(chapter.content, 'lxml')
-            img_tags = soup.find_all('img')
-            
-            if not img_tags:
-                continue
-
-            # 用于存储本章节已处理的图片 URL，避免在同一章节中重复处理
-            url_to_filename = {}
-            
             # 再次检查加载开关
             should_load = global_load_images and (source.load_images == 'Y')
-
-            for img in img_tags:
-                if img.get('class') and 'emoji' in img.get('class'):
-                    continue
-                
-                if not should_load:
-                    img.decompose()
-                    continue
-
-                src, remote_attrs = self._extract_image_src(img)
-                
-                # 彻底移除所有干扰属性，防止残留远程链接
-                for attr in remote_attrs:
-                    if img.has_attr(attr):
-                        del img[attr]
-
-                if not src or src.startswith('data:'):
-                    if not src:
-                        img.decompose()
-                    continue
-
-                # 如果本章节已经处理过这个 URL
-                if src in url_to_filename:
-                    img['src'] = f"images/{url_to_filename[src]}"
-                    continue
-
-                # 获取处理后的结果
-                result = download_results.get(src)
-
-                if result:
-                    filename, img_data = result
-                    url_to_filename[src] = filename
-
-                    # 检查是否已经添加过这个 item
-                    image_uid = f"image_{filename}"
-                    is_already_added = False
-                    for item in book.items:
-                        if item.id == image_uid:
-                            is_already_added = True
-                            break
-
-                    if not is_already_added:
-                        epub_image = epub.EpubItem(
-                            uid=image_uid,
-                            file_name=f"images/{filename}",
-                            media_type="image/jpeg",
-                            content=img_data
-                        )
-                        book.add_item(epub_image)
-
-                    # 更新图片 URL
-                    img['src'] = f"images/{filename}"
-                else:
-                    # 处理失败：彻底移除标签，绝不保留 http 引用
-                    self.logger.debug(f"Removing image tag (processing failed or skipped): {src}")
-                    img.decompose()
-
-            # 将修改后的 HTML 写回 chapter.content
-            chapter.content = str(soup)
+            self._process_images_in_chapter(
+                book, chapter, download_results, should_load=should_load
+            )
 
         # 设置书籍的阅读顺序
         book.spine = spine
@@ -601,68 +533,63 @@ class EPUBGenerator:
         if not chapter.content:
             return
 
+        # 保留旧的单章节入口，但复用主流程的统一回写逻辑。
+        download_results = {}
         soup = BeautifulSoup(chapter.content, 'lxml')
-        img_tags = soup.find_all('img')
-
-        if not img_tags:
-            return
-
-        # 用于存储已处理 of 图片 URL，避免在同一章节中重复处理
-        url_to_filename = {}
-
-        for img in img_tags:
+        for img in soup.find_all('img'):
             if img.get('class') and 'emoji' in img.get('class'):
                 continue
-            src, remote_attrs = self._extract_image_src(img)
-            
-            # 彻底移除所有干扰属性，防止残留远程链接
-            for attr in remote_attrs:
-                if img.has_attr(attr):
-                    del img[attr]
+            src, _ = self._extract_image_src(img)
+            if src and not src.startswith('data:') and src not in download_results:
+                download_results[src] = self.image_processor.download_and_process(src, article.url)
 
+        self._process_images_in_chapter(book, chapter, download_results, should_load=True)
+
+    def _process_images_in_chapter(
+        self, book: epub.EpubBook, chapter: epub.EpubHtml,
+        download_results: Dict[str, Optional[Tuple[str, bytes]]],
+        *, should_load: bool
+    ) -> None:
+        """清理章节图片并将已下载的图片资源加入 EPUB。"""
+        if not chapter.content:
+            return
+
+        soup = BeautifulSoup(chapter.content, 'lxml')
+        url_to_filename = {}
+        for img in soup.find_all('img'):
+            if img.get('class') and 'emoji' in img.get('class'):
+                continue
+            if not should_load:
+                img.decompose()
+                continue
+
+            src, remote_attrs = self._extract_image_src(img)
+            for attr in remote_attrs:
+                img.attrs.pop(attr, None)
             if not src or src.startswith('data:'):
                 if not src:
                     img.decompose()
                 continue
-
-            # 如果已经处理过这个 URL
             if src in url_to_filename:
                 img['src'] = f"images/{url_to_filename[src]}"
                 continue
 
-            # 处理图片
-            result = self.image_processor.download_and_process(src, article.url)
-
-            if result:
-                filename, img_data = result
-                url_to_filename[src] = filename
-
-                # 检查是否已经添加过这个 item
-                image_uid = f"image_{filename}"
-                is_already_added = False
-                for item in book.items:
-                    if item.id == image_uid:
-                        is_already_added = True
-                        break
-
-                if not is_already_added:
-                    epub_image = epub.EpubItem(
-                        uid=image_uid,
-                        file_name=f"images/{filename}",
-                        media_type="image/jpeg",
-                        content=img_data
-                    )
-                    book.add_item(epub_image)
-
-                # 更新图片 URL
-                img['src'] = f"images/{filename}"
-            else:
-                # 处理失败：彻底移除标签，绝不保留 http 引用
+            result = download_results.get(src)
+            if not result:
                 self.logger.debug(f"Removing image tag (processing failed or skipped): {src}")
                 img.decompose()
+                continue
 
-        # 将修改后的 HTML 写回 chapter.content (Bug 2)
-        # BeautifulSoup 会生成完整的 HTML 结构并正确处理转义字符
+            filename, img_data = result
+            url_to_filename[src] = filename
+            image_uid = f"image_{filename}"
+            if not any(item.id == image_uid for item in book.items):
+                book.add_item(epub.EpubItem(
+                    uid=image_uid, file_name=f"images/{filename}",
+                    media_type="image/jpeg", content=img_data
+                ))
+            img['src'] = f"images/{filename}"
+
         chapter.content = str(soup)
 
     def _add_summary_chapter(self, book: epub.EpubBook, results: List[FetchResult], error_log: List[str] = None, runtime: float = 0.0) -> set:
@@ -940,7 +867,7 @@ class EPUBGenerator:
 """
 
         if is_nav:
-            content += """
+            content += f"""
     <!-- EPUB 3.0 landmarks: cover -> cover.xhtml, toc -> contents.xhtml, bodymatter -> contents.xhtml -->
     <!-- Kindle 根据此块决定"打开时跳转到哪里"，hidden 使其不在阅读器目录中显示 -->
     <nav epub:type=\"landmarks\" id=\"landmarks\" hidden=\"\">
@@ -951,10 +878,6 @@ class EPUBGenerator:
         </ol>
     </nav>
 """
-
-        if not is_nav:
-            # Removed hidden link to nav.xhtml to allow removing nav.xhtml from spine.
-            pass
 
         content += """</body>
 </html>"""
@@ -995,7 +918,7 @@ class EPUBGenerator:
         from src.fetchers.base import _registry
         extra_css = ""
         for name, cls in _registry.items():
-            if hasattr(cls, "custom_css") and cls.custom_css:
+            if cls.custom_css:
                 extra_css += f"\n/* --- Custom CSS from {cls.__name__} ({name}) --- */\n{cls.custom_css.strip()}\n"
 
         css = epub.EpubItem(

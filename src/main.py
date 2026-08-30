@@ -35,11 +35,6 @@ from src.utils.logger import (
     log_summary_table,
 )
 
-# 纯文本最少字符数；只要有字（>=1）或包含图片即视为有效正文
-_MIN_PLAIN_TEXT_LEN = 1
-_TAG_RE = re.compile(r"<[^>]+>")
-
-
 def get_fetcher(source: ContentSource, global_limit: int = 15) -> BaseFetcher:
     """
     根据内容源类型获取对应的抓取器
@@ -70,10 +65,10 @@ def has_valid_content(article: Article) -> bool:
     if not article.content or not str(article.content).strip():
         return False
 
-    plain = unescape(_TAG_RE.sub("", article.content))
+    plain = unescape(re.sub(r"<[^>]+>", "", article.content))
     plain = re.sub(r"\s+", " ", plain).strip()
 
-    if len(plain) >= _MIN_PLAIN_TEXT_LEN:
+    if len(plain) > 0:
         return True
 
     if article.images:
@@ -83,6 +78,141 @@ def has_valid_content(article: Article) -> bool:
         return True
 
     return False
+
+
+def _close_fetcher(fetcher: BaseFetcher, source: ContentSource, logger, context: str) -> None:
+    """Close a fetcher without hiding a cleanup failure from the task log."""
+    if fetcher is None:
+        return
+    try:
+        fetcher.close()
+    except Exception as e:
+        logger.exception(f"{context}关闭抓取器失败 {source.src}: {e}")
+
+
+def _fresh_start_task(
+    source: ContentSource, tracker: DedupTracker
+) -> Tuple[FetchResult, List[Tuple[int, str]]]:
+    """Fetch one source and stage all currently available items for fresh start."""
+    logger = get_logger()
+    start_task_buffer()
+    fetcher = None
+    result = None
+    try:
+        fetcher = get_fetcher(source, global_limit=999999)
+        if not fetcher.dedup_enabled:
+            logger.info(
+                f"[Fresh Start] 跳过不参与去重的源: {source.type} | "
+                f"{truncate_url(source.src, 40)}"
+            )
+            result = FetchResult(source=source, articles=[], success=True)
+        elif fetcher.supports_two_phase:
+            candidates = fetcher.fetch_list()
+            if candidates:
+                urls = [c.get("url") for c in candidates if c.get("url")]
+                tracker.stage_source_snapshot(tracker.make_source_key(source), urls)
+                logger.info(
+                    f"[Fresh Start 两阶段] {source.type} | {truncate_url(source.src, 40)}: "
+                    f"标记 {len(urls)} 条候选 URL"
+                )
+            result = FetchResult(source=source, articles=[], success=True)
+        else:
+            result = fetcher.fetch_with_retry()
+            if result.success and result.articles:
+                urls = [article.url for article in result.articles if article.url]
+                tracker.stage_source_snapshot(tracker.make_source_key(source), urls)
+                logger.info(
+                    f"[Fresh Start 单阶段] {source.type} | {truncate_url(source.src, 40)}: "
+                    f"标记 {len(urls)} 条文章"
+                )
+                result.articles = []
+    except Exception as e:
+        logger.error(f"[Fresh Start] 异常失败 {source.src}: {e}")
+        result = FetchResult(source=source, articles=[], success=False, error=str(e))
+    finally:
+        _close_fetcher(fetcher, source, logger, "[Fresh Start] ")
+        records = stop_task_buffer()
+    return result, records
+
+
+def _fetch_source_task(
+    source: ContentSource, tracker: DedupTracker, global_limit: int
+) -> Tuple[FetchResult, List[Tuple[int, str]]]:
+    """Fetch one source, including two-phase filtering and dedup snapshots."""
+    logger = get_logger()
+    start_task_buffer()
+    fetcher = None
+    result = None
+    try:
+        fetcher = get_fetcher(source, global_limit=global_limit)
+        snapshot_staged = False
+
+        if fetcher.supports_two_phase:
+            candidates = fetcher.fetch_list()
+            if candidates is None:
+                logger.warning(f"fetch_list 返回 None，回退单阶段抓取: {source.src}")
+                result = fetcher.fetch_with_retry()
+            else:
+                source_key = tracker.make_source_key(source)
+                if fetcher.dedup_enabled and candidates:
+                    tracker.stage_source_snapshot(
+                        source_key, [c.get("url") for c in candidates]
+                    )
+                    snapshot_staged = True
+
+                if fetcher.dedup_enabled:
+                    new_candidates = [
+                        c for c in candidates
+                        if c.get("url") and not tracker.is_fetched(c["url"], source_key)
+                    ]
+                    limit = fetcher.get_limit()
+                    to_fetch = new_candidates[:limit]
+                    limit_skipped = new_candidates[limit:]
+                    skipped_dedup = len(candidates) - len(new_candidates)
+                    logger.info(
+                        f"[两阶段] {source.type} | {truncate_url(source.src, 40)}: "
+                        f"{len(to_fetch)}/{len(candidates)} 篇待抓取"
+                        + (f"，跳过已抓取 {skipped_dedup} 篇" if skipped_dedup else "")
+                        + (f"，本次限额未抓取 {len(limit_skipped)} 篇" if limit_skipped else "")
+                    )
+                else:
+                    limit = fetcher.get_limit()
+                    to_fetch = candidates[:limit]
+                    logger.info(
+                        f"[两阶段(无去重)] {source.type} | {truncate_url(source.src, 40)}: "
+                        f"{len(to_fetch)}/{len(candidates)} 篇待抓取"
+                    )
+                result = fetcher.fetch_items(to_fetch)
+        else:
+            result = fetcher.fetch_with_retry()
+
+        if fetcher.dedup_enabled and not snapshot_staged and result.success and result.articles:
+            tracker.stage_source_snapshot(
+                tracker.make_source_key(source), [article.url for article in result.articles]
+            )
+    except Exception as e:
+        logger.exception(f"抓取异常失败 {source.src}: {e}")
+        result = FetchResult(source=source, articles=[], success=False, error=str(e))
+    finally:
+        _close_fetcher(fetcher, source, logger, "")
+        records = stop_task_buffer()
+    return result, records
+
+
+def _run_parallel_tasks(sources, task):
+    """Run source tasks concurrently and return results with isolated logs."""
+    max_workers = min(len(sources), 20) if sources else 1
+    completed = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_source = {executor.submit(task, source): source for source in sources}
+        for future in concurrent.futures.as_completed(future_to_source):
+            source = future_to_source[future]
+            result, records = future.result()
+            completed.append((source, result, records))
+            flush_task_logs(
+                f"{source.type} | {truncate_url(source.src, 40)}", records
+            )
+    return completed
 
 
 def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[FetchResult]:
@@ -119,6 +249,7 @@ def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[F
         new_articles = []
         skipped_empty = 0
         skipped_dedup = 0
+        processor = ContentProcessor(result.source)
 
         for article in result.articles:
             if dedup_enabled and tracker.is_fetched(article.url, source_key):
@@ -127,9 +258,8 @@ def process_results(results: List[FetchResult], tracker: DedupTracker) -> List[F
                 continue
 
             # 先做内容处理，再判断是否有效；处理失败则保留原文再校验
-            orig_article = copy.deepcopy(article)
+            orig_article = article
             try:
-                processor = ContentProcessor(result.source)
                 article = processor.process(copy.deepcopy(orig_article))
             except Exception as e:
                 logger.error(
@@ -206,65 +336,9 @@ def main(argv=None):
             log_stage(2, 5, "执行 Fresh Start 全量标记去重记录")
             tracker.clear()
 
-            def fresh_start_task(source: ContentSource) -> Tuple[FetchResult, List[Tuple[int, str]]]:
-                start_task_buffer()
-                fetcher = None
-                result = None
-                try:
-                    fetcher = get_fetcher(source, global_limit=999999)
-                    if not fetcher.dedup_enabled:
-                        logger.info(f"[Fresh Start] 跳过不参与去重的源: {source.type} | {truncate_url(source.src, 40)}")
-                        result = FetchResult(source=source, articles=[], success=True)
-                    elif fetcher.supports_two_phase:
-                        candidates = fetcher.fetch_list()
-                        if candidates:
-                            urls = [c.get("url") for c in candidates if c.get("url")]
-                            tracker.stage_source_snapshot(
-                                tracker.make_source_key(source), urls
-                            )
-                            logger.info(
-                                f"[Fresh Start 两阶段] {source.type} | {truncate_url(source.src, 40)}: "
-                                f"标记 {len(urls)} 条候选 URL"
-                            )
-                        result = FetchResult(source=source, articles=[], success=True)
-                    else:
-                        result = fetcher.fetch_with_retry()
-                        if result.success and result.articles:
-                            urls = [article.url for article in result.articles if article.url]
-                            tracker.stage_source_snapshot(
-                                tracker.make_source_key(source), urls
-                            )
-                            logger.info(
-                                f"[Fresh Start 单阶段] {source.type} | {truncate_url(source.src, 40)}: "
-                                f"标记 {len(urls)} 条文章 URL"
-                            )
-                            result.articles = []
-                except Exception as e:
-                    logger.error(f"[Fresh Start] 异常失败 {source.src}: {e}")
-                    result = FetchResult(source=source, articles=[], success=False, error=str(e))
-                finally:
-                    if fetcher is not None:
-                        try:
-                            fetcher.close()
-                        except Exception as e:
-                            logger.exception(f"[Fresh Start] 关闭抓取器失败 {source.src}: {e}")
-                    records = stop_task_buffer()
-                return result, records
-
-            max_workers = min(len(config.body), 20) if config.body else 1
-            fresh_results = []
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_source = {
-                    executor.submit(fresh_start_task, source): source
-                    for source in config.body
-                }
-                for future in concurrent.futures.as_completed(future_to_source):
-                    source = future_to_source[future]
-                    result, records = future.result()
-                    fresh_results.append(result)
-                    short_src = truncate_url(source.src, 40)
-                    prefix = f"{source.type} | {short_src}"
-                    flush_task_logs(prefix, records)
+            _run_parallel_tasks(
+                config.body, lambda source: _fresh_start_task(source, tracker)
+            )
 
             tracker.save()
             stats = tracker.get_stats()
@@ -280,107 +354,15 @@ def main(argv=None):
         error_log: List[str] = []
         raw_counts = {}
 
-        def fetch_source_task(source: ContentSource) -> Tuple[FetchResult, List[Tuple[int, str]]]:
-            start_task_buffer()
-            fetcher = None
-            result = None
-            try:
-                fetcher = get_fetcher(source, global_limit=config.limit)
-                snapshot_staged = False
-
-                if fetcher.supports_two_phase:
-                    candidates = fetcher.fetch_list()
-                    if candidates is None:
-                        logger.warning(
-                            f"fetch_list 返回 None，回退单阶段抓取: {source.src}"
-                        )
-                        result = fetcher.fetch_with_retry()
-                    else:
-                        source_key = tracker.make_source_key(source)
-                        # 参见 docs/DEDUP.md 的“两阶段抓取”：快照覆盖全部候选。
-                        if fetcher.dedup_enabled and candidates:
-                            tracker.stage_source_snapshot(
-                                source_key, [c.get("url") for c in candidates]
-                            )
-                            snapshot_staged = True
-                        if fetcher.dedup_enabled:
-                            new_candidates = [
-                                c for c in candidates
-                                if c.get("url") and not (
-                                    tracker.is_fetched(c["url"], source_key)
-                                )
-                            ]
-                            limit = fetcher.get_limit()
-                            to_fetch = new_candidates[:limit]
-                            limit_skipped = new_candidates[limit:]
-
-                            skipped_dedup = len(candidates) - len(new_candidates)
-                            logger.info(
-                                f"[两阶段] {source.type} | {truncate_url(source.src, 40)}: "
-                                f"{len(to_fetch)}/{len(candidates)} 篇待抓取"
-                                + (f"，跳过已抓取 {skipped_dedup} 篇" if skipped_dedup else "")
-                                + (f"，本次限额未抓取 {len(limit_skipped)} 篇" if limit_skipped else "")
-                            )
-                            result = fetcher.fetch_items(to_fetch)
-                        else:
-                            limit = fetcher.get_limit()
-                            to_fetch = candidates[:limit]
-                            logger.info(
-                                f"[两阶段(无去重)] {source.type} | {truncate_url(source.src, 40)}: "
-                                f"{len(to_fetch)}/{len(candidates)} 篇待抓取"
-                            )
-                            result = fetcher.fetch_items(to_fetch)
-                else:
-                    result = fetcher.fetch_with_retry()
-
-                if (
-                    fetcher.dedup_enabled
-                    and not snapshot_staged
-                    and result.success
-                    and result.articles
-                ):
-                    tracker.stage_source_snapshot(
-                        tracker.make_source_key(source),
-                        [article.url for article in result.articles],
-                    )
-            except Exception as e:
-                logger.exception(f"抓取异常失败 {source.src}: {e}")
-                result = FetchResult(source=source, articles=[], success=False, error=str(e))
-            finally:
-                if fetcher is not None:
-                    try:
-                        fetcher.close()
-                    except Exception as e:
-                        logger.exception(f"关闭抓取器失败 {source.src}: {e}")
-                records = stop_task_buffer()
-            return result, records
-
-        max_workers = min(len(config.body), 20) if config.body else 1
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_source = {
-                executor.submit(fetch_source_task, source): source
-                for source in config.body
-            }
-
-            for future in concurrent.futures.as_completed(future_to_source):
-                source = future_to_source[future]
-                try:
-                    result, records = future.result()
-                    results.append(result)
-                    raw_counts[source] = len(result.articles) if result.success else 0
-
-                    short_src = truncate_url(source.src, 40)
-                    prefix = f"{source.type} | {short_src}"
-                    flush_task_logs(prefix, records)
-
-                    if not result.success:
-                        error_log.append(f"[{source.type}] {source.src}: {result.error}")
-                except Exception as e:
-                    logger.exception(f"线程执行失败 [{source.type}] {source.src}: {e}")
-                    error_log.append(f"[{source.type}] {source.src}: {str(e)}")
-                    res = FetchResult(source=source, articles=[], success=False, error=str(e))
-                    results.append(res)
-                    raw_counts[source] = 0
+        completed = _run_parallel_tasks(
+            config.body,
+            lambda source: _fetch_source_task(source, tracker, config.limit),
+        )
+        for source, result, _records in completed:
+            results.append(result)
+            raw_counts[source] = len(result.articles) if result.success else 0
+            if not result.success:
+                error_log.append(f"[{source.type}] {source.src}: {result.error}")
 
         # 3. 处理结果（去重、内容过滤处理）
         log_stage(3, 5, "去重与内容过滤处理")

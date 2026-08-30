@@ -239,7 +239,6 @@ class ContentProcessor:
         文本节点按文档顺序排列，每个元素是 BeautifulSoup 的 NavigableString，
         对其 .string 赋值会直接反映到 DOM 树上。
         """
-        from bs4 import NavigableString
         soup = BeautifulSoup(html, 'lxml')
         body = soup.body if soup.body else soup
         text_nodes = [n for n in body.find_all(string=True) if isinstance(n, NavigableString)]
@@ -247,102 +246,51 @@ class ContentProcessor:
 
     def _delete_from_start(self, html: str, keyword: str) -> str:
         """删除从文档开头到 keyword（含 keyword 本身）之间的全部内容"""
-        soup = BeautifulSoup(html, 'lxml')
-        
-        # 1. 寻找第一个包含 keyword 的文本节点
-        target_node = None
-        for node in soup.find_all(string=True):
-            if keyword in node:
-                target_node = node
-                break
-        
-        if target_node:
-            # 找到关键词所在位置
-            text = str(target_node)
-            idx = text.find(keyword)
-            
-            # 保留关键词之后的内容
-            remaining_text = text[idx + len(keyword):]
-            
-            # 向上递归处理：删除当前节点及其所有父节点之前的兄弟节点
-            curr = target_node
-            while curr and curr.name != '[document]':
-                # 获取当前节点的所有前序兄弟节点（包括元素、文本等）
-                # 必须转换为列表，因为 extract() 会改变迭代器
-                for prev in list(curr.previous_siblings):
-                    prev.extract()
-                curr = curr.parent
-            
-            # 更新目标文本节点的内容
-            if remaining_text:
-                target_node.replace_with(remaining_text)
-            else:
-                target_node.extract()
-                
-            return str(soup.body if soup.body else soup)
-
-        # 2. 如果单节点没找到，尝试跨节点检查（仅做文本层面的检查，但不建议破坏结构）
-        full_text = soup.get_text()
-        if keyword in full_text:
-            self.logger.warning(
-                f"exclude 'start' keyword '{keyword}' spans multiple nodes. "
-                "Structure preservation might be imperfect."
-            )
-            # 这里的策略：如果跨节点，我们至少不再退回到纯文本
-            # 而是尝试定位到大致的元素位置，或者直接报错不处理以保护图片
-            # 目前采用更安全的做法：如果不确定如何精确切割 DOM，则不执行删除，以保护图片
-            # 除非是极简单的文档，否则跨节点切割 DOM 非常容易出错
-            return html
-
-        self.logger.debug(f"exclude 'start' keyword not found: '{keyword}'")
-        return html
+        return self._delete_keyword_from_text_nodes(html, keyword, from_start=True)
 
     def _delete_from_end(self, html: str, keyword: str) -> str:
         """删除从 keyword（含 keyword 本身）到文档结尾的全部内容"""
+        return self._delete_keyword_from_text_nodes(html, keyword, from_start=False)
+
+    def _delete_keyword_from_text_nodes(
+        self, html: str, keyword: str, *, from_start: bool
+    ) -> str:
+        """按方向删除关键词所在文本节点及其同级内容，保留 HTML 结构。"""
         soup = BeautifulSoup(html, 'lxml')
-        
-        # 1. 寻找最后一个包含 keyword 的文本节点（从后往前找）
         text_nodes = soup.find_all(string=True)
-        target_node = None
-        for node in reversed(text_nodes):
-            if keyword in node:
-                target_node = node
-                break
-        
+        candidates = text_nodes if from_start else reversed(text_nodes)
+        target_node = next((node for node in candidates if keyword in node), None)
         if target_node:
-            # 找到关键词最后一次出现的位置
             text = str(target_node)
-            idx = text.rfind(keyword)
-            
-            # 保留关键词之前的内容
-            remaining_text = text[:idx]
-            
-            # 向上递归处理：删除当前节点及其所有父节点之后的兄弟节点
+            idx = text.find(keyword) if from_start else text.rfind(keyword)
+            remaining_text = text[idx + len(keyword):] if from_start else text[:idx]
+
             curr = target_node
             while curr and curr.name != '[document]':
-                # 获取当前节点的所有后续兄弟节点
-                for nxt in list(curr.next_siblings):
-                    nxt.extract()
+                siblings = curr.previous_siblings if from_start else curr.next_siblings
+                for sibling in list(siblings):
+                    sibling.extract()
                 curr = curr.parent
-            
-            # 更新目标文本节点的内容
+
             if remaining_text:
                 target_node.replace_with(remaining_text)
             else:
                 target_node.extract()
-                
             return str(soup.body if soup.body else soup)
 
-        # 2. 跨节点检查
-        full_text = soup.get_text()
-        if keyword in full_text:
+        if keyword in soup.get_text():
+            rule_name = 'start' if from_start else 'end'
+            detail = (
+                'Structure preservation might be imperfect.' if from_start
+                else 'Deletion skipped to preserve HTML structure and images.'
+            )
             self.logger.warning(
-                f"exclude 'end' keyword '{keyword}' spans multiple nodes. "
-                "Deletion skipped to preserve HTML structure and images."
+                f"exclude '{rule_name}' keyword '{keyword}' spans multiple nodes. {detail}"
             )
             return html
 
-        self.logger.debug(f"exclude 'end' keyword not found: '{keyword}'")
+        rule_name = 'start' if from_start else 'end'
+        self.logger.debug(f"exclude '{rule_name}' keyword not found: '{keyword}'")
         return html
 
     @staticmethod
@@ -914,8 +862,6 @@ class ContentProcessor:
         处理后：
           <p>是用 <code>codesign</code> 给微信重新签名</p>
         """
-        from bs4 import NavigableString, Tag
-
         inline_tags = {
             'a', 'abbr', 'b', 'cite', 'code', 'del', 'em', 'i',
             'kbd', 'mark', 'q', 's', 'samp', 'small', 'span', 'strong', 'sub',
@@ -987,8 +933,6 @@ class ContentProcessor:
         段落中间行而强制拉伸两端对齐产生巨大字符间距。
         将非 Emoji 图片从混排段落中拆分出来，使其作为独立段落排版。
         """
-        from bs4 import NavigableString, Tag
-
         for p in list(soup.find_all('p')):
             imgs = [img for img in p.find_all('img') if not (img.get('class') and 'emoji' in img.get('class'))]
             if not imgs:
@@ -1062,10 +1006,6 @@ class ContentProcessor:
         # 使用 BeautifulSoup 的修复能力
         soup = BeautifulSoup(html, 'lxml')
 
-        # 内容源有时会同时用 </p> 和 <br> 表示段落换行，形成
-        # <p>第一段</p><br/><p>第二段</p>。这会让阅读器把段落外边距和
-        # 强制换行叠加，导致段间距异常增大。仅移除段落元素之间的冗余
-        # <br>，保留段落内部的 <br>，避免破坏正文中的正常强制换行。
         block_names = {'p', 'div', 'section', 'article', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}
         redundant_breaks = []
         for parent in soup.find_all(True):

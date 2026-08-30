@@ -8,14 +8,18 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
-from urllib.parse import urljoin
 import httpx
 import trafilatura
 
 from src.config import ContentSource
 from src.utils.logger import get_logger
 from src.utils.safe_url import validate_url
-from src.utils.safe_http import create_safe_client, SafeTransport
+from src.utils.safe_http import (
+    MAX_ARTICLE_BYTES,
+    create_safe_client,
+    safe_request,
+)
+from src.utils.helpers import get_now
 
 
 @dataclass
@@ -126,7 +130,6 @@ class BaseFetcher(ABC):
         self.max_retries = max_retries
         self.logger = get_logger()
         self._client = None
-        self._scraper = None
         self._playwright = None
         self._browser = None
         self._browser_context = None
@@ -273,6 +276,7 @@ class BaseFetcher(ABC):
         params: Optional[Dict[str, Any]] = None,
         raise_for_status: bool = True,
         allow_browser_fallback: bool = False,
+        max_response_bytes: int = MAX_ARTICLE_BYTES,
     ) -> httpx.Response:
         """
         发送 HTTP 请求。所有 fetcher 的网络访问都应走此方法，以便统一
@@ -300,7 +304,11 @@ class BaseFetcher(ABC):
             limits = httpx.Limits(max_keepalive_connections=10, max_connections=20)
             self._client = create_safe_client(timeout=timeout, follow_redirects=False, limits=limits)
 
-        response = self._client.request(
+        # Keep one implementation for URL validation, redirect handling, and
+        # response-size limits.  ``raise_for_status`` stays disabled here so
+        # HTML requests can still use the browser fallback below.
+        response = safe_request(
+            self._client,
             method,
             url,
             headers=default_headers,
@@ -308,45 +316,10 @@ class BaseFetcher(ABC):
             json=json,
             data=data,
             params=params,
-            follow_redirects=False,
+            max_redirects=self.MAX_REDIRECTS,
+            max_response_bytes=max_response_bytes,
+            raise_for_status=False,
         )
-        response.read()  # 确保读取响应体
-
-        redirect_count = 0
-        while True:
-            status_code = getattr(response, "status_code", None)
-            is_redirect = isinstance(status_code, int) and 300 <= status_code < 400
-            location = response.headers.get("location") if is_redirect else None
-            if not location:
-                break
-
-            if redirect_count >= self.MAX_REDIRECTS:
-                raise httpx.TooManyRedirects(
-                    f"Exceeded maximum of {self.MAX_REDIRECTS} redirects",
-                    request=response.request,
-                )
-
-            current_url = str(response.request.url)
-            target = urljoin(current_url, location)
-            if not validate_url(target):
-                raise httpx.InvalidURL(f"Unsafe redirect target: {target}")
-
-            # Build the next request explicitly so the target is validated
-            # before httpx opens the connection. Preserve the method and body
-            # rather than letting a redirect policy silently change them.
-            request_headers = dict(response.request.headers)
-            request_headers.pop("host", None)
-            request_headers.pop("content-length", None)
-            response = self._client.request(
-                response.request.method,
-                target,
-                headers=request_headers,
-                content=response.request.content,
-                timeout=timeout,
-                follow_redirects=False,
-            )
-            response.read()
-            redirect_count += 1
 
         # Playwright 回退说明见 docs/PLAYWRIGHT.md。只有明确标记的 HTML 页面请求才启用浏览器，避免 API/XML 请求
         # 在遇到普通错误时启动 Chromium。
@@ -363,6 +336,11 @@ class BaseFetcher(ABC):
                     timeout=timeout,
                 )
                 if browser_response is not None:
+                    content = getattr(browser_response, "content", None)
+                    if isinstance(content, (bytes, bytearray)) and len(content) > max_response_bytes:
+                        raise ValueError(
+                            f"Browser response body exceeded maximum limit ({max_response_bytes} bytes)"
+                        )
                     return browser_response
             except Exception as browser_error:
                 self.logger.warning(
@@ -570,9 +548,6 @@ class BaseFetcher(ABC):
             soup = BeautifulSoup(html, 'lxml')
         images = []
         
-        # 排除关键词
-        exclude_keywords = ['avatar', 'logo', 'icon', 'button', 'loading', 'spacer', 'ad_']
-
         for img in soup.find_all('img'):
             # 1. 尝试多个候选属性
             src = None
@@ -610,11 +585,6 @@ class BaseFetcher(ABC):
             if src.lower().startswith('data:') or any(ext in src.lower() for ext in ['.gif', '.svg']):
                 continue
             
-            # 排除明显的占位图/图标
-            if any(kw in src.lower() for kw in exclude_keywords):
-                # 除非它是唯一的图片或非常大，否则跳过
-                pass 
-                
             # 3. 解析为绝对路径
             full_url = self._resolve_url(src, base_url or self.source.src)
             if full_url not in images:
@@ -742,6 +712,60 @@ class BaseFetcher(ABC):
         except Exception as e:
             self.logger.error(f"Failed to fetch full text from {url}: {e}")
             return "", ""
+
+    def _extract_article_metadata(self, raw_html: str, url: str) -> tuple:
+        """Extract title/author/date with a parser-independent fallback."""
+        title = ""
+        author = None
+        published_date = None
+
+        if raw_html:
+            try:
+                from src.utils.helpers import HTML_PARSING_LOCK
+                with HTML_PARSING_LOCK:
+                    metadata = trafilatura.extract_metadata(raw_html, default_url=url)
+                if metadata:
+                    title = metadata.title or ""
+                    author = metadata.author
+                    published_date = metadata.date
+            except Exception as exc:
+                self.logger.warning(f"使用 trafilatura 提取元数据失败 [{url}]: {exc}")
+
+            if not title:
+                from bs4 import BeautifulSoup
+                from src.utils.helpers import HTML_PARSING_LOCK
+                with HTML_PARSING_LOCK:
+                    soup = BeautifulSoup(raw_html, "lxml")
+                heading = soup.find("h1")
+                title = heading.get_text().strip() if heading else ""
+                if not title:
+                    title_node = soup.find("title")
+                    title = title_node.get_text().strip() if title_node else "Untitled"
+
+        return title or "Untitled", author, published_date or get_now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _extract_content_fallback(self, raw_html: str) -> str:
+        """Extract a readable content container when full-text extraction fails."""
+        if not raw_html:
+            return ""
+
+        from bs4 import BeautifulSoup
+        from src.utils.helpers import HTML_PARSING_LOCK
+        with HTML_PARSING_LOCK:
+            soup = BeautifulSoup(raw_html, "lxml")
+
+        containers = (
+            soup.find("article"),
+            soup.find("div", class_="article"),
+            soup.find("div", class_="content"),
+            soup.find("div", class_="entry-content"),
+            soup.find("div", id="content"),
+            soup.find("main"),
+        )
+        for container in containers:
+            if container:
+                return str(container)
+        return str(soup.body) if soup.body else ""
 
     def _should_delete(self, title: str) -> bool:
         """

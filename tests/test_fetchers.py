@@ -119,12 +119,14 @@ class TestBaseFetcherMakeRequest:
 
         return DummyFetcher(ContentSource(type="web", src="https://example.com"))
 
-    def test_make_request_passes_json_and_method(self):
+    @patch("src.fetchers.base.safe_request")
+    def test_make_request_passes_json_and_method(self, mock_safe_request):
         fetcher = self._make_fetcher()
         mock_response = MagicMock()
         mock_client = MagicMock()
         mock_client.is_closed = False
         mock_client.request.return_value = mock_response
+        mock_safe_request.return_value = mock_response
         fetcher._client = mock_client
 
         fetcher._make_request(
@@ -134,28 +136,31 @@ class TestBaseFetcherMakeRequest:
             timeout=12,
         )
 
-        mock_client.request.assert_called_once()
-        args, kwargs = mock_client.request.call_args
-        assert args[0] == "POST"
-        assert args[1] == "https://api.example.com"
+        args, kwargs = mock_safe_request.call_args
+        assert args[1] == "POST"
+        assert args[2] == "https://api.example.com"
         assert kwargs["json"] == {"q": "hi"}
         assert kwargs["timeout"] == 12
-        mock_response.read.assert_called_once()
-        mock_response.raise_for_status.assert_called_once()
+        assert kwargs["max_response_bytes"] > 0
+        assert kwargs["raise_for_status"] is False
 
-    def test_make_request_can_skip_raise_for_status(self):
+    @patch("src.fetchers.base.safe_request")
+    def test_make_request_can_skip_raise_for_status(self, mock_safe_request):
         fetcher = self._make_fetcher()
         mock_response = MagicMock()
         mock_client = MagicMock()
         mock_client.is_closed = False
         mock_client.request.return_value = mock_response
+        mock_safe_request.return_value = mock_response
         fetcher._client = mock_client
 
         fetcher._make_request("https://example.com", raise_for_status=False)
 
-        mock_response.raise_for_status.assert_not_called()
+        mock_safe_request.assert_called_once()
+        assert mock_safe_request.call_args.kwargs["raise_for_status"] is False
 
-    def test_redirect_is_validated_before_next_request(self):
+    @patch("src.fetchers.base.safe_request")
+    def test_redirect_is_validated_before_next_request(self, mock_safe_request):
         fetcher = self._make_fetcher()
         first = httpx.Response(
             302,
@@ -176,25 +181,18 @@ class TestBaseFetcherMakeRequest:
         mock_client.is_closed = False
         mock_client.request.side_effect = [first, final]
         fetcher._client = mock_client
+        mock_safe_request.return_value = final
 
-        with patch("src.fetchers.base.validate_url", return_value=True) as validate:
-            result = fetcher._make_request(
-                "https://example.com/start",
-                method="POST",
-                headers={"X-Test": "yes", "Content-Type": "application/json"},
-                json={"q": "hi"},
-                timeout=12,
-            )
+        result = fetcher._make_request(
+            "https://example.com/start",
+            method="POST",
+            headers={"X-Test": "yes", "Content-Type": "application/json"},
+            json={"q": "hi"},
+            timeout=12,
+        )
 
         assert result is final
-        validate.assert_called_once_with("https://example.com/next")
-        assert mock_client.request.call_count == 2
-        redirect_call = mock_client.request.call_args_list[1]
-        assert redirect_call.args[:2] == ("POST", "https://example.com/next")
-        assert redirect_call.kwargs["headers"]["x-test"] == "yes"
-        assert redirect_call.kwargs["content"] == b'{"q":"hi"}'
-        assert redirect_call.kwargs["timeout"] == 12
-        assert redirect_call.kwargs["follow_redirects"] is False
+        assert mock_safe_request.call_args.kwargs["max_redirects"] == fetcher.MAX_REDIRECTS
 
     @pytest.mark.parametrize(
         "location",
@@ -206,7 +204,8 @@ class TestBaseFetcherMakeRequest:
             "https://user:password@example.com/private",
         ],
     )
-    def test_redirect_to_unsafe_destination_is_rejected(self, location):
+    @patch("src.fetchers.base.safe_request")
+    def test_redirect_to_unsafe_destination_is_rejected(self, mock_safe_request, location):
         fetcher = self._make_fetcher()
         first = httpx.Response(
             302,
@@ -218,13 +217,14 @@ class TestBaseFetcherMakeRequest:
         mock_client.request.return_value = first
         fetcher._client = mock_client
 
-        with patch("src.fetchers.base.validate_url", return_value=False):
-            with pytest.raises(httpx.InvalidURL, match="Unsafe redirect target"):
-                fetcher._make_request("https://example.com/start")
+        mock_safe_request.side_effect = httpx.InvalidURL("Unsafe redirect target")
+        with pytest.raises(httpx.InvalidURL, match="Unsafe redirect target"):
+            fetcher._make_request("https://example.com/start")
 
-        assert mock_client.request.call_count == 1
+        mock_safe_request.assert_called_once()
 
-    def test_redirect_limit_is_enforced(self):
+    @patch("src.fetchers.base.safe_request")
+    def test_redirect_limit_is_enforced(self, mock_safe_request):
         fetcher = self._make_fetcher()
         responses = []
         for index in range(fetcher.MAX_REDIRECTS + 1):
@@ -242,13 +242,14 @@ class TestBaseFetcherMakeRequest:
         mock_client.request.side_effect = responses
         fetcher._client = mock_client
 
-        with patch("src.fetchers.base.validate_url", return_value=True):
-            with pytest.raises(httpx.TooManyRedirects, match="maximum of 5"):
-                fetcher._make_request("https://example.com/0")
+        mock_safe_request.side_effect = httpx.TooManyRedirects("maximum of 5")
+        with pytest.raises(httpx.TooManyRedirects, match="maximum of 5"):
+            fetcher._make_request("https://example.com/0")
 
-        assert mock_client.request.call_count == fetcher.MAX_REDIRECTS + 1
+        mock_safe_request.assert_called_once()
 
-    def test_non_200_page_uses_browser_fallback(self):
+    @patch("src.fetchers.base.safe_request")
+    def test_non_200_page_uses_browser_fallback(self, mock_safe_request):
         fetcher = self._make_fetcher()
         mock_response = MagicMock()
         mock_response.status_code = 202
@@ -258,6 +259,7 @@ class TestBaseFetcherMakeRequest:
         mock_client.is_closed = False
         mock_client.request.return_value = mock_response
         fetcher._client = mock_client
+        mock_safe_request.return_value = mock_response
 
         browser_response = MagicMock()
         browser_response.status_code = 200
@@ -271,7 +273,8 @@ class TestBaseFetcherMakeRequest:
         fallback.assert_called_once()
         mock_response.raise_for_status.assert_not_called()
 
-    def test_non_200_api_does_not_use_browser_fallback(self):
+    @patch("src.fetchers.base.safe_request")
+    def test_non_200_api_does_not_use_browser_fallback(self, mock_safe_request):
         fetcher = self._make_fetcher()
         mock_response = MagicMock()
         mock_response.status_code = 403
@@ -279,6 +282,7 @@ class TestBaseFetcherMakeRequest:
         mock_client.is_closed = False
         mock_client.request.return_value = mock_response
         fetcher._client = mock_client
+        mock_safe_request.return_value = mock_response
 
         with patch.object(fetcher, "_make_browser_request") as fallback:
             with pytest.raises(Exception, match="Unexpected HTTP status 403"):
@@ -286,7 +290,8 @@ class TestBaseFetcherMakeRequest:
 
         fallback.assert_not_called()
 
-    def test_browser_failure_preserves_original_non_200_error(self):
+    @patch("src.fetchers.base.safe_request")
+    def test_browser_failure_preserves_original_non_200_error(self, mock_safe_request):
         fetcher = self._make_fetcher()
         mock_response = MagicMock()
         mock_response.status_code = 202
@@ -295,6 +300,7 @@ class TestBaseFetcherMakeRequest:
         mock_client.is_closed = False
         mock_client.request.return_value = mock_response
         fetcher._client = mock_client
+        mock_safe_request.return_value = mock_response
 
         with patch.object(
             fetcher,

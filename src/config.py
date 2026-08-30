@@ -5,7 +5,7 @@
 
 import json
 import os
-from datetime import datetime
+import re
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
@@ -25,12 +25,12 @@ class TitleConfig:
         date_str = now.strftime("%Y-%m-%d")
 
         # 先处理 {xxx {time}} 格式（必须在简单替换之前，否则 {time} 会被提前替换掉）
-        import re
         pattern = r'\{([^{}]+)\{time\}\}'
-        def _replace_complex(m):
-            prefix = m.group(1).strip()
-            return f"{prefix} {date_str}"
-        result = re.sub(pattern, _replace_complex, result)
+        result = re.sub(
+            pattern,
+            lambda match: f"{match.group(1).strip()} {date_str}",
+            result,
+        )
 
         # 再替换剩余的独立 {time}
         if "{time}" in result:
@@ -40,7 +40,6 @@ class TitleConfig:
 
     def get_plain_text(self) -> str:
         """获取纯文本标题，去除所有 HTML 标签（如 </br>、<a> 等）"""
-        import re
         text = self.get_display_text()
         # 移除所有 HTML 标签
         text = re.sub(r'<[^>]+>', '', text)
@@ -99,12 +98,13 @@ class ContentSource:
 
 @dataclass
 class WebDavConfig:
-    """WebDAV 配置"""
+    """WebDAV 配置（仅由环境变量构造，不属于 Config 文件配置）。"""
     enabled: bool = False
     url: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
     remote_path: str = "/"
+
 
 @dataclass
 class Config:
@@ -113,7 +113,6 @@ class Config:
     body: List[ContentSource]
     limit: int = 15  # 全局每源抓取上限
     load_images: str = "Y"  # 全局是否加载图片 (Y/N)
-    webdav: Optional[WebDavConfig] = None
 
     def get_sorted_sources(self) -> List[ContentSource]:
         """获取按优先级排序的内容源（降序，稳定排序）"""
@@ -154,6 +153,8 @@ def load_config(config_path: str = "config.json") -> Config:
 
 def _parse_config(data: Dict[str, Any]) -> Config:
     """解析配置数据"""
+    if not isinstance(data, dict):
+        raise ValueError("config must be an object")
     # 解析标题配置
     if "title" not in data:
         raise ValueError("title is required in config")
@@ -206,10 +207,22 @@ def _parse_config(data: Dict[str, Any]) -> Config:
     if raw_limit is None:
         raw_limit = data.get("global_limit", 15)
 
+    valid_limit_type = isinstance(raw_limit, int) and not isinstance(raw_limit, bool)
+    if isinstance(raw_limit, str):
+        valid_limit_type = raw_limit.strip().isdigit()
+    if not valid_limit_type:
+        raise ValueError("limit must be a non-negative integer")
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError) as e:
+        raise ValueError("limit must be a non-negative integer") from e
+    if limit < 0:
+        raise ValueError("limit must be a non-negative integer")
+
     return Config(
         title=title_config,
         body=sources,
-        limit=int(raw_limit),
+        limit=limit,
         load_images=data.get("load_images", "Y")
     )
 

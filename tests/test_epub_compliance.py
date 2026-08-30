@@ -193,6 +193,7 @@ class TestEpubContent:
             "landmarks应包含epub:type='toc'指向contents.xhtml"
         assert 'epub:type="bodymatter" href="contents.xhtml"' in nav_html, \
             "landmarks应包含epub:type='bodymatter'指向contents.xhtml（Kindle打开时落在目录页）"
+        assert "{self.translator(" not in nav_html
 
         print(f"✓ nav.xhtml包含hidden的landmarks地标导航（cover+toc+bodymatter配置正确，Kindle兼容）")
 
