@@ -21,6 +21,18 @@ def _make_article(content: str, title: str = "Test") -> Article:
     )
 
 
+def test_does_not_auto_bold_text_before_colon():
+    """正文开头的文本不应再被全局识别为说话人并自动加粗。"""
+    source = ContentSource(type="weather", src="Shanghai")
+    processor = ContentProcessor(source)
+    article = _make_article("<p>天气：晴，温度 25°C</p>")
+
+    result = processor.process(article)
+
+    assert "<strong>天气：</strong>" not in result.content
+    assert "天气：晴，温度 25°C" in result.content
+
+
 # =========================================================================
 # exclude: start 规则测试
 # =========================================================================
@@ -1093,6 +1105,5 @@ class TestNestedPreInParagraphOrInline:
         article = _make_article(html)
         result = processor.process(article)
         assert '<p><img src="https://example.com/only.png"/></p>' in result.content
-
 
 

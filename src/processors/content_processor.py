@@ -830,28 +830,6 @@ class ContentProcessor:
                 elif attr in ('width', 'height') and tag.name != 'img':
                     del tag[attr]
 
-        # === 对话者/采访人姓名加粗增强 ===
-        # 扫描段落 <p> 中以 "Speaker Name:" 开头但未被 <strong>/<b> 包裹的对话者标识并进行加粗
-        speaker_pattern = re.compile(r'^([A-Z\u4e00-\u9fa5][A-Za-z0-9\u4e00-\u9fa5\s\.\-–—]{0,30}[:：])(.*|$)')
-        skip_prefixes = {"http:", "https:", "ftp:", "file:", "note:", "url:"}
-        from bs4 import NavigableString, Tag
-        for p in soup.find_all('p'):
-            if not p.contents:
-                continue
-            first_child = p.contents[0]
-            if isinstance(first_child, NavigableString) and not isinstance(first_child, Tag):
-                text_str = str(first_child)
-                m = speaker_pattern.match(text_str)
-                if m:
-                    speaker_part = m.group(1)
-                    if speaker_part.lower() not in skip_prefixes:
-                        rest_part = text_str[len(speaker_part):]
-                        strong_tag = soup.new_tag('strong')
-                        strong_tag.string = speaker_part
-                        first_child.replace_with(strong_tag)
-                        if rest_part:
-                            strong_tag.insert_after(rest_part)
-
         # 仅返回 body 内部的内容，避免产生嵌套 of html/body 标签
         if soup.body:
             return soup.body.decode_contents()
