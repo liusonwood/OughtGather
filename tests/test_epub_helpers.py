@@ -6,6 +6,7 @@ EPUB 辅助工具模块测试
 import pytest
 from ebooklib import epub
 from src.epub.helpers import generate_toc_link, create_section_divider_page
+from src.epub.i18n import EPUBTranslator
 
 
 class TestEPUBHelpers:
@@ -13,7 +14,7 @@ class TestEPUBHelpers:
 
     def test_generate_toc_link(self):
         """测试生成返回目录超链接"""
-        link_html = generate_toc_link("toc_chapter_1")
+        link_html = generate_toc_link("toc_chapter_1", EPUBTranslator("zh-CN"))
         assert 'class="toc-link"' in link_html
         assert 'href="contents.xhtml#toc_chapter_1"' in link_html
         assert "返回目录" in link_html
@@ -29,7 +30,8 @@ class TestEPUBHelpers:
             section_title="测试大栏目 & 频道",
             file_name="divider_99.xhtml",
             target_toc_id="toc_section_99",
-            articles_info=articles_info
+            articles_info=articles_info,
+            translator=EPUBTranslator("zh-CN")
         )
         assert isinstance(divider, epub.EpubHtml)
         assert divider.title == "测试大栏目 & 频道"
@@ -50,4 +52,3 @@ class TestEPUBHelpers:
         assert '文章标题 1 &amp; 测试' in content
         assert 'href="chapter_1.xhtml"' in content
         assert '文章标题 2' in content
-

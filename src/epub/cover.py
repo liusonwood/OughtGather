@@ -14,6 +14,7 @@ from src.config import TitleConfig
 from src.utils.logger import get_logger
 from src.utils.safe_http import create_safe_client, safe_request
 from src.utils.safe_url import validate_url
+from src.epub.i18n import EPUBTranslator
 
 ALLOWED_COVER_FORMATS = {"JPEG", "PNG", "WEBP"}
 MAX_COVER_PIXELS = 25_000_000
@@ -26,7 +27,7 @@ class CoverGenerator:
     WIDTH = 1440
     HEIGHT = 1920
 
-    def __init__(self, title_config: TitleConfig):
+    def __init__(self, title_config: TitleConfig, locale: str = None):
         """
         初始化封面生成器
 
@@ -35,6 +36,7 @@ class CoverGenerator:
         """
         self.title_config = title_config
         self.logger = get_logger()
+        self.locale = EPUBTranslator(locale).locale
 
     def generate(self) -> Tuple[str, bytes]:
         """
@@ -91,7 +93,7 @@ class CoverGenerator:
         """
         try:
             # Bing API
-            api_url = "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=zh-CN"
+            api_url = self._build_bing_api_url()
 
             with create_safe_client(timeout=30) as client:
                 response = safe_request(client, "GET", api_url)
@@ -109,6 +111,13 @@ class CoverGenerator:
             self.logger.error(f"Failed to fetch Bing wallpaper: {e}")
 
         return None
+
+    def _build_bing_api_url(self) -> str:
+        """Build the Bing daily-wallpaper URL for the active EPUB locale."""
+        return (
+            "https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1"
+            f"&mkt={self.locale}"
+        )
 
     def _download_image(self, url: str) -> Optional[Image.Image]:
         """

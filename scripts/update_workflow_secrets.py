@@ -53,6 +53,8 @@ def update_workflow(secrets):
     new_env += "          WEBDAV_REMOTE_PATH: ${{ secrets.WEBDAV_REMOTE_PATH }}\n"
     new_env += "          WEBDAV_URL: ${{ secrets.WEBDAV_URL }}\n"
     new_env += "          WEBDAV_USERNAME: ${{ secrets.WEBDAV_USERNAME }}\n\n"
+    new_env += "          # EPUB localization and Bing wallpaper market (optional)\n"
+    new_env += "          EPUB_LANGUAGE: ${{ secrets.EPUB_LANGUAGE }}\n\n"
     new_env += "          # 自动注入 Secrets\n"
     
     # Sort keys

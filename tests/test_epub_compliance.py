@@ -373,8 +373,8 @@ class TestEpubMetadata:
 
             print(f"✓ OPF包含正确的guide(cover/toc/text/start)元素，cover指向cover.xhtml，toc指向nav.xhtml，text/start指向contents.xhtml")
 
-    def test_language_is_zh(self, shared_epub):
-        """测试语言设置为中文"""
+    def test_language_defaults_to_english_locale(self, shared_epub):
+        """测试未设置环境变量时默认使用英文 locale"""
         with zipfile.ZipFile(shared_epub, 'r') as zf:
             opf_content = zf.read('EPUB/content.opf')
             root = ET.fromstring(opf_content)
@@ -383,9 +383,9 @@ class TestEpubMetadata:
             assert len(languages) >= 1, "应包含language字段"
 
             lang_value = languages[0].text
-            assert lang_value == 'zh', f"语言应为'zh'，实际为'{lang_value}'"
+        assert lang_value == 'en-US', f"默认语言应为'en-US'，实际为'{lang_value}'"
 
-            print(f"✓ 语言设置为zh（中文）")
+        print(f"✓ 默认语言设置为 en-US（英文）")
 
 
 class TestContainerXml:

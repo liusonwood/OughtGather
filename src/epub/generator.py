@@ -14,6 +14,7 @@ from src.processors.content_processor import ContentProcessor
 from src.epub.cover import CoverGenerator
 from src.epub.toc import TOCGenerator
 from src.epub.helpers import generate_toc_link, create_section_divider_page
+from src.epub.i18n import EPUBTranslator
 from src.processors.image_processor import ImageProcessor
 from src.utils.logger import get_logger
 from src.utils.helpers import get_now
@@ -35,9 +36,10 @@ class EPUBGenerator:
         """
         self.config = config
         self.logger = get_logger()
+        self.translator = EPUBTranslator()
         self.image_processor = ImageProcessor()
         self.toc_generator = TOCGenerator()
-        self.cover_generator = CoverGenerator(config.title)
+        self.cover_generator = CoverGenerator(config.title, self.translator.locale)
         self.cover_page: Optional[epub.EpubHtml] = None
 
     def generate(
@@ -74,7 +76,7 @@ class EPUBGenerator:
         toc = self.toc_generator.generate(sections)
         book.toc = toc
         # 将 contents.xhtml 设为 NCX 目录首项，防止部分 Kindle 转制路径将 NCX 首项(原为 divider_0)当作正文起点
-        book.toc.insert(0, epub.Link("contents.xhtml", "目录 / Contents", "contents"))
+        book.toc.insert(0, epub.Link("contents.xhtml", self.translator("navigation.contents"), "contents"))
 
         # 初始化 spine
         book.spine = []
@@ -104,7 +106,7 @@ class EPUBGenerator:
         book.add_item(nav)
 
         # 11. 生成并添加物理目录页 contents.xhtml
-        contents = epub.EpubHtml(title="目录", file_name='contents.xhtml', uid='contents')
+        contents = epub.EpubHtml(title=self.translator("navigation.contents"), file_name='contents.xhtml', uid='contents', lang=self.translator.locale)
         contents.content = self._generate_nav_content(book.title, book.toc, is_nav=False)
         contents.add_link(href='style/default.css', rel='stylesheet')
         book.add_item(contents)
@@ -123,12 +125,12 @@ class EPUBGenerator:
         # 将 toc 指向隐藏的 nav.xhtml，保护 contents.xhtml 不被 Kindle 识别为 frontmatter 跳过；
         # 将 contents.xhtml 标记为正文起点 (text / start)，cover 指向 cover.xhtml。
         guide = [
-            {'href': 'nav.xhtml', 'title': 'Table of Contents', 'type': 'toc'},
-            {'href': 'contents.xhtml', 'title': 'Start of Content', 'type': 'text'},
-            {'href': 'contents.xhtml', 'title': 'Start of Content', 'type': 'start'},
+            {'href': 'nav.xhtml', 'title': self.translator("navigation.table_of_contents"), 'type': 'toc'},
+            {'href': 'contents.xhtml', 'title': self.translator("navigation.start_of_content"), 'type': 'text'},
+            {'href': 'contents.xhtml', 'title': self.translator("navigation.start_of_content"), 'type': 'start'},
         ]
         if self.cover_page is not None:
-            guide.insert(0, {'href': 'cover.xhtml', 'title': 'Cover', 'type': 'cover'})
+            guide.insert(0, {'href': 'cover.xhtml', 'title': self.translator("navigation.cover"), 'type': 'cover'})
         book.guide = guide
 
         # 14. 保存文件
@@ -144,7 +146,7 @@ class EPUBGenerator:
         book.set_identifier(str(uuid.uuid4()))
         book.set_title(self.config.title.get_plain_text())
         # 使用 zh (匹配成功文件)
-        book.set_language('zh')
+        book.set_language(self.translator.locale)
         book.add_author('Ought Gather')
 
     def _add_cover(self, book: epub.EpubBook):
@@ -158,10 +160,10 @@ class EPUBGenerator:
 
             safe_title = html_module.escape(self.config.title.get_plain_text())
             cover_page = epub.EpubHtml(
-                title="Cover", file_name="cover.xhtml", uid="cover_page", lang="zh"
+                title=self.translator("navigation.cover"), file_name="cover.xhtml", uid="cover_page", lang=self.translator.locale
             )
             cover_page.content = f"""<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh" xml:lang="zh">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{self.translator.locale}" xml:lang="{self.translator.locale}">
 <head>
     <title>Cover</title>
     <style type="text/css">
@@ -267,7 +269,8 @@ class EPUBGenerator:
                 section_title=section_title,
                 file_name=f"divider_{divider_id}.xhtml",
                 target_toc_id=target_toc_id,
-                articles_info=articles_info
+                articles_info=articles_info,
+                translator=self.translator
             )
             book.add_item(divider)
             spine.append(divider)
@@ -494,9 +497,9 @@ class EPUBGenerator:
         safe_author = html.escape(article.author) if article.author else ""
 
         # EPUB 3.0 使用 HTML5 DOCTYPE
-        toc_link = generate_toc_link(f"toc_chapter_{chapter_id}")
+        toc_link = generate_toc_link(f"toc_chapter_{chapter_id}", self.translator)
         content_html = f"""<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" epub:prefix="z3998: http://www.daisy.org/z3998/2012/vocab/structure/#" lang="zh" xml:lang="zh">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" epub:prefix="z3998: http://www.daisy.org/z3998/2012/vocab/structure/#" lang="{self.translator.locale}" xml:lang="{self.translator.locale}">
 <head>
     <title>{safe_title}</title>
     <link rel="stylesheet" type="text/css" href="style/default.css"/>
@@ -509,10 +512,10 @@ class EPUBGenerator:
         # 添加元信息
         metadata_lines = []
         if safe_author:
-            metadata_lines.append(f"Author/作者: {safe_author}")
+            metadata_lines.append(f"{self.translator('article.author')}: {safe_author}")
         if article.published_date:
             safe_date = html.escape(str(article.published_date))
-            metadata_lines.append(f"Date/日期: {safe_date}")
+            metadata_lines.append(f"{self.translator('article.date')}: {safe_date}")
         if metadata_lines:
             content_html += "<p class='author date'>" + "<br/>".join(metadata_lines) + "</p>"
 
@@ -522,7 +525,7 @@ class EPUBGenerator:
         # 添加原文链接 (仅保留 http/https 的合法绝对链接)
         if article.url and (article.url.startswith('http://') or article.url.startswith('https://')):
             safe_url = html.escape(article.url)
-            content_html += f"<p class='link'>原文链接: <a href='{safe_url}'>{safe_url}</a></p>"
+            content_html += f"<p class='link'>{self.translator('article.original_link')}: <a href='{safe_url}'>{safe_url}</a></p>"
 
         content_html += """
 </body>
@@ -685,7 +688,7 @@ class EPUBGenerator:
         failed_sources = sum(1 for r in results if not r.success)
         total_articles = sum(len(r.articles) for r in results)
         
-        runtime_str = f"{runtime:.1f} 秒"
+        runtime_str = self.translator("summary.runtime_seconds", seconds=f"{runtime:.1f}")
 
         source_details = ""
         for r in results:
@@ -694,15 +697,15 @@ class EPUBGenerator:
             if r.success:
                 source_details += f"""
             <li class="source-item">
-                <span class="stat-label">[{src_type}] {src_name}</span>：
-                <span class="tag-success">成功</span>，新增 <span class="tag-success">{len(r.articles)}</span> 篇文章
+                <span class="stat-label">[{src_type}] {src_name}</span>:
+                <span class="tag-success">{self.translator('summary.source_success', count=len(r.articles))}</span>
             </li>"""
             else:
-                err_msg = html.escape(r.error or "未知错误")
+                err_msg = html.escape(r.error or self.translator("summary.unknown_error"))
                 source_details += f"""
             <li class="source-item">
-                <span class="stat-label">[{src_type}] {src_name}</span>：
-                <span class="tag-failed">失败</span> ({err_msg})
+                <span class="stat-label">[{src_type}] {src_name}</span>:
+                <span class="tag-failed">{self.translator('summary.source_failed', error=err_msg)}</span>
             </li>"""
 
         if error_log:
@@ -712,13 +715,13 @@ class EPUBGenerator:
                 error_log_content += f"        <li>{safe_error}</li>\n"
             error_log_content += "    </ul>"
         else:
-            error_log_content = "<p style='color: #2e7d32; font-weight: bold;'><span class=\"emoji\">🎉</span> 一切正常，本次运行未发生任何错误。</p>"
+            error_log_content = f"<p style='color: #2e7d32; font-weight: bold;'><span class=\"emoji\">🎉</span> {html.escape(self.translator('summary.no_errors'))}</p>"
 
         # EPUB 3.0 使用 HTML5 DOCTYPE
         content_html = f"""<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" epub:prefix="z3998: http://www.daisy.org/z3998/2012/vocab/structure/#" lang="zh" xml:lang="zh">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" epub:prefix="z3998: http://www.daisy.org/z3998/2012/vocab/structure/#" lang="{self.translator.locale}" xml:lang="{self.translator.locale}">
 <head>
-    <title>Summary / 推送汇总</title>
+    <title>{self.translator('summary.title')}</title>
     <link rel="stylesheet" type="text/css" href="style/default.css"/>
     <style type="text/css">
         .summary-title {{
@@ -772,43 +775,40 @@ class EPUBGenerator:
         }}
         .intro-text {{
             line-height: 1.6;
-            text-indent: 2em;
-            margin-bottom: 1em;
+            margin-bottom: 0.8em;
             color: #333333;
         }}
     </style>
 </head>
 <body>
-    <h1 class=\"summary-title\">Summary / 推送汇总</h1>
-    {generate_toc_link("toc_summary")}
+    <h1 class=\"summary-title\">{self.translator('summary.title')}</h1>
+    {generate_toc_link("toc_summary", self.translator)}
 
 
     <div class="card">
-        <div class=\"card-title\"><span class=\"emoji\">ℹ️</span> About / 关于 Ought Gather</div>
-        <p class=\"intro-text\">Automated information aggregator delivering custom RSS, web articles, and newsletters to your Kindle as daily EPUBs
-        <br>自动化信息聚合工具，支持将 RSS、网页、邮件等定时打包为 EPUB 推送至 Kindle。</p>
-        <p class=\"intro-text\">For configuration or contribution, please visit the GitHub repository or use <code>config-editor.html</code>.<br>
-        想要添加或修改内容源、查看系统说明或贡献代码，请访问 GitHub 项目主页，或使用内置的配置编辑器 <code>config-editor.html</code> 进行可视化管理。</p>
-        <p class=\"intro-text\">GitHub: <a href=\"https://github.com/liusonwood/oughtgather\">https://github.com/liusonwood/oughtgather</a></p>
+        <div class=\"card-title\"><span class=\"emoji\">ℹ️</span> {self.translator('summary.about_title')}</div>
+        <p class=\"intro-text\">{html.escape(self.translator('summary.about_description'))}</p>
+        <p class=\"intro-text\">{html.escape(self.translator('summary.about_configuration'))}</p>
+        <p class=\"intro-text\"><b>{self.translator('summary.github_label')}:</b> <a href=\"https://github.com/liusonwood/oughtgather\">https://github.com/liusonwood/oughtgather</a></p>
     </div>
     
     <div class="card">
-        <div class=\"card-title\">Statistics / 运行数据统计</div>
-        <div class=\"stat-item\"><span class=\"stat-label\">Time / 推送时间：</span>{push_time}</div>
-        <div class=\"stat-item\"><span class=\"stat-label\">Runtime / 运行耗时：</span>{runtime_str}</div>
-        <div class=\"stat-item\"><span class=\"stat-label\">Sources / 内容源总数：</span>{total_sources}</div>
-        <div class=\"stat-item\"><span class=\"stat-label\">Articles / 新增文章：</span><span class=\"tag-success\">{total_articles}</span></div>
-        <div class=\"stat-item\"><span class=\"stat-label\">Success / 成功抓取：</span><span class=\"tag-success\">{success_sources}</span></div>
-        <div class=\"stat-item\"><span class=\"stat-label\">Failed / 抓取失败：</span><span class=\"tag-failed\">{failed_sources}</span></div>
+        <div class=\"card-title\">{self.translator('summary.statistics_title')}</div>
+        <div class=\"stat-item\"><span class=\"stat-label\">{self.translator('summary.time')}:</span> {push_time}</div>
+        <div class=\"stat-item\"><span class=\"stat-label\">{self.translator('summary.runtime')}:</span> {runtime_str}</div>
+        <div class=\"stat-item\"><span class=\"stat-label\">{self.translator('summary.sources')}:</span> {total_sources}</div>
+        <div class=\"stat-item\"><span class=\"stat-label\">{self.translator('summary.articles')}:</span> <span class=\"tag-success\">{total_articles}</span></div>
+        <div class=\"stat-item\"><span class=\"stat-label\">{self.translator('summary.success')}:</span> <span class=\"tag-success\">{success_sources}</span></div>
+        <div class=\"stat-item\"><span class=\"stat-label\">{self.translator('summary.failed')}:</span> <span class=\"tag-failed\">{failed_sources}</span></div>
     </div>
 
     <div class="card">
-        <div class=\"card-title\"><span class=\"emoji\">⚠️</span> Errors / 异常与错误记录</div>
+        <div class=\"card-title\"><span class=\"emoji\">⚠️</span> {self.translator('summary.errors_title')}</div>
         {error_log_content}
     </div>
     
     <div class="card">
-        <div class=\"card-title\"><span class=\"emoji\">🔌</span> Source Details / 内容源详情</div>
+        <div class=\"card-title\"><span class=\"emoji\">🔌</span> {self.translator('summary.source_details_title')}</div>
         <ul class="source-list">
             {source_details}
         </ul>
@@ -825,7 +825,7 @@ class EPUBGenerator:
         content_html = ContentProcessor.replace_emojis_with_images(content_html)
 
         chapter = epub.EpubHtml(
-            title="Summary / 推送汇总",
+            title=self.translator("summary.title"),
             file_name="summary.xhtml"
         )
         chapter.content = content_html
@@ -833,7 +833,7 @@ class EPUBGenerator:
         book.add_item(chapter)
 
         # 添加到目录
-        book.toc.append(epub.Link("summary.xhtml", "Summary / 推送汇总", "summary"))
+        book.toc.append(epub.Link("summary.xhtml", self.translator("summary.title"), "summary"))
 
         # 添加到 spine（阅读顺序），保持为线性 (linear="yes")
         chapter.is_linear = True
@@ -897,7 +897,7 @@ class EPUBGenerator:
         body_attrs = 'style="padding: 1em;"' if is_nav else 'style="padding: 1em;" epub:type="bodymatter"'
 
         content = f"""<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh" xml:lang="zh">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{self.translator.locale}" xml:lang="{self.translator.locale}">
 <head>
     <title>{safe_title}</title>
     <link rel="stylesheet" type="text/css" href="style/default.css"/>
@@ -945,9 +945,9 @@ class EPUBGenerator:
     <!-- Kindle 根据此块决定"打开时跳转到哪里"，hidden 使其不在阅读器目录中显示 -->
     <nav epub:type=\"landmarks\" id=\"landmarks\" hidden=\"\">
         <ol>
-            <li><a epub:type=\"cover\" href=\"cover.xhtml\">Cover / 封面</a></li>
-            <li><a epub:type=\"toc\" href=\"contents.xhtml\">Table of Contents / 目录</a></li>
-            <li><a epub:type=\"bodymatter\" href=\"contents.xhtml\">Start of Content / 开始阅读</a></li>
+            <li><a epub:type=\"cover\" href=\"cover.xhtml\">{self.translator('navigation.cover')}</a></li>
+            <li><a epub:type=\"toc\" href=\"contents.xhtml\">{self.translator('navigation.table_of_contents')}</a></li>
+            <li><a epub:type=\"bodymatter\" href=\"contents.xhtml\">{self.translator('navigation.start_of_content')}</a></li>
         </ol>
     </nav>
 """

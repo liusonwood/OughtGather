@@ -3,6 +3,7 @@ from src.epub.cover import CoverGenerator
 from src.config import TitleConfig
 from PIL import Image
 import pytest
+from unittest.mock import MagicMock, patch
 
 def test_add_text_overlay_mask():
     config = TitleConfig(text="Test Title", img="")
@@ -26,3 +27,9 @@ def test_add_text_overlay_mask():
     assert pixel[0] == 255 # Red component should still be high
     assert pixel[1] > 0   # Green component should have increased
     assert pixel[2] > 0   # Blue component should have increased
+
+
+def test_bing_wallpaper_uses_epub_locale(monkeypatch):
+    monkeypatch.setenv("EPUB_LANGUAGE", "ja-JP")
+    generator = CoverGenerator(TitleConfig(text="Test Title", img=""))
+    assert "mkt=ja-JP" in generator._build_bing_api_url()

@@ -147,6 +147,9 @@ jobs:
           WEBDAV_URL: ${{ secrets.WEBDAV_URL }}
           WEBDAV_USERNAME: ${{ secrets.WEBDAV_USERNAME }}
 
+          # EPUB localization and Bing wallpaper market (optional)
+          EPUB_LANGUAGE: ${{ secrets.EPUB_LANGUAGE }}
+
           # 自动注入 Secrets
           OPENROUTER_API_ENDPOINT: ${{ secrets.OPENROUTER_API_ENDPOINT }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

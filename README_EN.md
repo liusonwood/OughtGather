@@ -32,6 +32,7 @@ Ought Gather is a Python-based automated information aggregation tool. It collec
 - **Advanced Content Controls**: Configure source-specific priorities, link preservation (`keep_link`), full-text extraction (`full_text`), HTML element exclusion (`exclude`), and title keyword filtering (`delete`).
 - **Standard EPUB 3.0 Generation**: Creates compliant EPUB files featuring an auto-generated cover, table of contents, main body, and a delivery summary chapter.
 - **Dynamic Covers**: Supports custom cover images, fallback to Bing's Daily Wallpaper, and simple solid background fallback if network requests fail.
+- **EPUB Localization**: Use the optional `EPUB_LANGUAGE` Secret/environment variable with a Bing locale such as `en-US` or `zh-CN` to localize EPUB system text and select Bing's wallpaper region. Missing or invalid values fall back to English (`en-US`).
 - **Formatting Placeholders**: Supports `{time}` for dates in titles and `</br>` for cover line-breaks.
 - **Deduplication System**: Keeps track of processed content using `fetched_urls.txt`, with automatic pruning once records exceed 500,000 entries.
 - **Environment Overrides**: Allows delivering full configurations via the `CONFIG_JSON` environment variable to keep private content feeds out of public source repositories.
@@ -152,6 +153,7 @@ Configure these in your GitHub repository under `Settings -> Secrets and variabl
 | Secret / Env Var | Description |
 | --- | --- |
 | `CONFIG_JSON` | A complete `config.json` string representation. This overrides the root directory's `config.json` file. Highly recommended for GitHub Actions deployment to avoid hardcoding feed secrets into the codebase. |
+| `EPUB_LANGUAGE` | Optional EPUB/Bing locale, such as `en-US` or `zh-CN`. It controls EPUB system text and Bing's wallpaper region; missing or invalid values use English (`en-US`). |
 | `KINDLE_EMAIL` | Your Kindle device email address (`@kindle.com`) |
 | `SMTP_HOST` | Outgoing SMTP server address (e.g., `smtp.gmail.com`) |
 | `SMTP_PASSWORD` | Outgoing mail account password or app-specific token |

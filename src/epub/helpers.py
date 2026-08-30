@@ -7,11 +7,12 @@ import html as html_module
 from ebooklib import epub
 
 from src.processors.content_processor import ContentProcessor
+from src.epub.i18n import EPUBTranslator
 
 
 from typing import List, Dict
 
-def generate_toc_link(target_id: str) -> str:
+def generate_toc_link(target_id: str, translator: EPUBTranslator = None) -> str:
     """
     生成统一的 “返回目录” 超链接 HTML 片段
 
@@ -21,14 +22,16 @@ def generate_toc_link(target_id: str) -> str:
     Returns:
         str: HTML 片段
     """
-    return f'<p class=\"toc-link\"><a href=\"contents.xhtml#{target_id}\">Back/返回目录</a></p>'
+    translator = translator or EPUBTranslator()
+    return f'<p class=\"toc-link\"><a href=\"contents.xhtml#{target_id}\">{translator("navigation.back_to_contents")}</a></p>'
 
 
 def create_section_divider_page(
     section_title: str,
     file_name: str,
     target_toc_id: str,
-    articles_info: List[Dict[str, str]] = None
+    articles_info: List[Dict[str, str]] = None,
+    translator: EPUBTranslator = None
 ) -> epub.EpubHtml:
     """
     创建统一的章节分隔页 (EpubHtml 对象)
@@ -44,9 +47,10 @@ def create_section_divider_page(
     Returns:
         epub.EpubHtml: 分隔页对象
     """
+    translator = translator or EPUBTranslator()
     safe_title = html_module.escape(section_title)
     rendered_title = ContentProcessor.render_text_with_emojis(section_title)
-    toc_link = generate_toc_link(target_toc_id)
+    toc_link = generate_toc_link(target_toc_id, translator)
 
     articles_html = ""
     if articles_info:
@@ -73,7 +77,7 @@ def create_section_divider_page(
         articles_html += f'    </div>\n'
 
     content = f"""<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" epub:prefix="z3998: http://www.daisy.org/z3998/2012/vocab/structure/#" lang="zh" xml:lang="zh">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" epub:prefix="z3998: http://www.daisy.org/z3998/2012/vocab/structure/#" lang="{translator.locale}" xml:lang="{translator.locale}">
 <head>
     <title>{safe_title}</title>
     <link rel="stylesheet" type="text/css" href="style/default.css"/>
