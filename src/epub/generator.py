@@ -940,7 +940,7 @@ class EPUBGenerator:
 """
 
         if is_nav:
-            content += """
+            content += f"""
     <!-- EPUB 3.0 landmarks: cover -> cover.xhtml, toc -> contents.xhtml, bodymatter -> contents.xhtml -->
     <!-- Kindle 根据此块决定"打开时跳转到哪里"，hidden 使其不在阅读器目录中显示 -->
     <nav epub:type=\"landmarks\" id=\"landmarks\" hidden=\"\">

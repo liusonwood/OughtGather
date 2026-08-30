@@ -154,6 +154,8 @@ def load_config(config_path: str = "config.json") -> Config:
 
 def _parse_config(data: Dict[str, Any]) -> Config:
     """解析配置数据"""
+    if not isinstance(data, dict):
+        raise ValueError("config must be an object")
     # 解析标题配置
     if "title" not in data:
         raise ValueError("title is required in config")
@@ -206,10 +208,22 @@ def _parse_config(data: Dict[str, Any]) -> Config:
     if raw_limit is None:
         raw_limit = data.get("global_limit", 15)
 
+    valid_limit_type = isinstance(raw_limit, int) and not isinstance(raw_limit, bool)
+    if isinstance(raw_limit, str):
+        valid_limit_type = raw_limit.strip().isdigit()
+    if not valid_limit_type:
+        raise ValueError("limit must be a non-negative integer")
+    try:
+        limit = int(raw_limit)
+    except (TypeError, ValueError) as e:
+        raise ValueError("limit must be a non-negative integer") from e
+    if limit < 0:
+        raise ValueError("limit must be a non-negative integer")
+
     return Config(
         title=title_config,
         body=sources,
-        limit=int(raw_limit),
+        limit=limit,
         load_images=data.get("load_images", "Y")
     )
 

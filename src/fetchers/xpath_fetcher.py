@@ -1,12 +1,8 @@
 from typing import List, Optional, Any, Dict
-from urllib.parse import urljoin
 from lxml import html as lxml_html
-from bs4 import BeautifulSoup
-import trafilatura
 
 from src.config import ContentSource
 from src.fetchers.base import BaseFetcher, FetchResult, Article
-from src.utils.helpers import get_now
 
 class XPathListAutoFetcher(BaseFetcher):
     """
@@ -84,58 +80,9 @@ class XPathListAutoFetcher(BaseFetcher):
                     # 使用基类提供的 _fetch_full_text 获取正文 HTML 和原始 HTML
                     content_html, raw_html = self._fetch_full_text(link)
                     
-                    title = ""
-                    author = None
-                    pub_date = None
-                    
-                    # 提取元数据 (标题、作者、发布时间)
-                    if raw_html:
-                        try:
-                            from src.utils.helpers import HTML_PARSING_LOCK
-                            with HTML_PARSING_LOCK:
-                                meta = trafilatura.extract_metadata(raw_html, default_url=link)
-                            if meta:
-                                title = meta.title
-                                author = meta.author
-                                pub_date = meta.date
-                        except Exception as meta_err:
-                            self.logger.warning(f"使用 trafilatura 提取元数据失败 [{link}]: {meta_err}")
-                    
-                    # 降级策略 A：若元数据未能成功提取标题，采用 BeautifulSoup 兜底提取
-                    if not title and raw_html:
-                        from src.utils.helpers import HTML_PARSING_LOCK
-                        with HTML_PARSING_LOCK:
-                            soup = BeautifulSoup(raw_html, "lxml")
-                        h1_node = soup.find("h1")
-                        title = h1_node.get_text().strip() if h1_node else ""
-                        if not title:
-                            title_node = soup.find("title")
-                            title = title_node.get_text().strip() if title_node else "Untitled"
-                    
-                    # 降级策略 B：若基类 _fetch_full_text 未能通过 trafilatura 抽取到正文
-                    if not content_html and raw_html:
-                        from src.utils.helpers import HTML_PARSING_LOCK
-                        with HTML_PARSING_LOCK:
-                            soup = BeautifulSoup(raw_html, "lxml")
-                        possible_containers = [
-                            soup.find("article"),
-                            soup.find("div", class_="article"),
-                            soup.find("div", class_="content"),
-                            soup.find("div", class_="entry-content"),
-                            soup.find("div", id="content"),
-                            soup.find("main")
-                        ]
-                        for container in possible_containers:
-                            if container:
-                                content_html = str(container)
-                                break
-                        # 若仍没有，降级使用整个 body 
-                        if not content_html and soup.body:
-                            content_html = str(soup.body)
-                    
-                    # 填充发布日期：若没有抓取到时间，采用系统的北京时间兜底
-                    if not pub_date:
-                        pub_date = get_now().strftime("%Y-%m-%d %H:%M:%S")
+                    title, author, pub_date = self._extract_article_metadata(raw_html, link)
+                    if not content_html:
+                        content_html = self._extract_content_fallback(raw_html)
                     
                     # 结合提取封面图（og:image等）与正文中的图片
                     og_images = self._extract_og_image(raw_html, link) if raw_html else []
@@ -249,53 +196,9 @@ class XPathListAutoFetcher(BaseFetcher):
                 self.logger.info(f"[阶段二] 抓取详情页: {link}")
                 content_html, raw_html = self._fetch_full_text(link)
 
-                title = ""
-                author = None
-                pub_date = None
-
-                if raw_html:
-                    try:
-                        from src.utils.helpers import HTML_PARSING_LOCK
-                        with HTML_PARSING_LOCK:
-                            meta = trafilatura.extract_metadata(raw_html, default_url=link)
-                        if meta:
-                            title = meta.title
-                            author = meta.author
-                            pub_date = meta.date
-                    except Exception as meta_err:
-                        self.logger.warning(f"提取元数据失败 [{link}]: {meta_err}")
-
-                if not title and raw_html:
-                    from src.utils.helpers import HTML_PARSING_LOCK
-                    with HTML_PARSING_LOCK:
-                        soup = BeautifulSoup(raw_html, "lxml")
-                    h1_node = soup.find("h1")
-                    title = h1_node.get_text().strip() if h1_node else ""
-                    if not title:
-                        title_node = soup.find("title")
-                        title = title_node.get_text().strip() if title_node else "Untitled"
-
-                if not content_html and raw_html:
-                    from src.utils.helpers import HTML_PARSING_LOCK
-                    with HTML_PARSING_LOCK:
-                        soup = BeautifulSoup(raw_html, "lxml")
-                    possible_containers = [
-                        soup.find("article"),
-                        soup.find("div", class_="article"),
-                        soup.find("div", class_="content"),
-                        soup.find("div", class_="entry-content"),
-                        soup.find("div", id="content"),
-                        soup.find("main")
-                    ]
-                    for container in possible_containers:
-                        if container:
-                            content_html = str(container)
-                            break
-                    if not content_html and soup.body:
-                        content_html = str(soup.body)
-
-                if not pub_date:
-                    pub_date = get_now().strftime("%Y-%m-%d %H:%M:%S")
+                title, author, pub_date = self._extract_article_metadata(raw_html, link)
+                if not content_html:
+                    content_html = self._extract_content_fallback(raw_html)
 
                 og_images = self._extract_og_image(raw_html, link) if raw_html else []
                 body_images = self._extract_images(content_html, link) if content_html else []

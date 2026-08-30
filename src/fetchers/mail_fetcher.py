@@ -206,9 +206,6 @@ class MailFetcher(BaseFetcher):
         # 提取图片
         images = self._extract_images(html_content)
 
-        # 应用内容处理规则
-        html_content = self._apply_content_rules(html_content)
-
         # 清洗 HTML，确保能被 ebooklib 正确解析为 XHTML
         html_content = self._sanitize_html(html_content)
 
@@ -302,24 +299,6 @@ class MailFetcher(BaseFetcher):
             return True
 
         return False
-
-    def _apply_content_rules(self, html: str) -> str:
-        """
-        应用内容处理规则（chop、exclude）
-
-        Args:
-            html: HTML 内容
-
-        Returns:
-            str: 处理后的 HTML
-        """
-        if not html:
-            return html
-
-        # TODO: 实现 chop 和 exclude 规则
-        # 这些规则将在 content_processor 中统一处理
-
-        return html
 
     def _sanitize_html(self, html: str) -> str:
         """

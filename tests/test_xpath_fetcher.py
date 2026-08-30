@@ -47,7 +47,7 @@ class TestXPathListAutoFetcher:
             allow_browser_fallback=True,
         )
 
-    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata")
+    @patch("src.fetchers.base.trafilatura.extract_metadata")
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
     @patch.object(XPathListAutoFetcher, "_make_request")
     def test_fetch_with_candidate_links_string_and_element(self, mock_request, mock_fetch, mock_extract_meta):
@@ -128,7 +128,7 @@ class TestXPathListAutoFetcher:
         assert art3.url == "http://example.com/detail3"
         assert art3.content == "<p>Content 3</p>"
 
-    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata", side_effect=Exception("mocked trafilatura error"))
+    @patch("src.fetchers.base.trafilatura.extract_metadata", side_effect=Exception("mocked trafilatura error"))
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
     @patch.object(XPathListAutoFetcher, "_make_request")
     def test_title_fallback_logic(self, mock_request, mock_fetch, mock_extract_meta):
@@ -168,7 +168,7 @@ class TestXPathListAutoFetcher:
         result = fetcher.fetch()
         assert result.articles[0].title == "Untitled"
 
-    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata", return_value=None)
+    @patch("src.fetchers.base.trafilatura.extract_metadata", return_value=None)
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
     @patch.object(XPathListAutoFetcher, "_make_request")
     def test_content_fallback_logic(self, mock_request, mock_fetch, mock_extract_meta):
@@ -202,8 +202,8 @@ class TestXPathListAutoFetcher:
             article_content = result.articles[0].content
             assert expected_text in article_content
 
-    @patch("src.fetchers.xpath_fetcher.get_now")
-    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata", return_value=None)
+    @patch("src.fetchers.base.get_now")
+    @patch("src.fetchers.base.trafilatura.extract_metadata", return_value=None)
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
     @patch.object(XPathListAutoFetcher, "_make_request")
     def test_pub_date_fallback_logic(self, mock_request, mock_fetch, mock_extract_meta, mock_get_now):
@@ -230,7 +230,7 @@ class TestXPathListAutoFetcher:
 
     @patch.object(XPathListAutoFetcher, "_extract_images")
     @patch.object(XPathListAutoFetcher, "_extract_og_image")
-    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata", return_value=None)
+    @patch("src.fetchers.base.trafilatura.extract_metadata", return_value=None)
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
     @patch.object(XPathListAutoFetcher, "_make_request")
     def test_image_extraction_and_deduplication(self, mock_request, mock_fetch, mock_extract_meta, mock_og_img, mock_body_img):
@@ -259,7 +259,7 @@ class TestXPathListAutoFetcher:
             "http://example.com/body_image2.jpg"
         ]
 
-    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata", return_value=None)
+    @patch("src.fetchers.base.trafilatura.extract_metadata", return_value=None)
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
     @patch.object(XPathListAutoFetcher, "_make_request")
     def test_delete_rule_filtering(self, mock_request, mock_fetch, mock_extract_meta):
@@ -286,7 +286,7 @@ class TestXPathListAutoFetcher:
         assert len(result.articles) == 1
         assert result.articles[0].title == "正常的干货文章"
 
-    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata", return_value=None)
+    @patch("src.fetchers.base.trafilatura.extract_metadata", return_value=None)
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
     @patch.object(XPathListAutoFetcher, "_make_request")
     def test_global_limit_capping(self, mock_request, mock_fetch, mock_extract_meta):
@@ -309,7 +309,7 @@ class TestXPathListAutoFetcher:
         assert len(result.articles) == 2
         assert mock_fetch.call_count == 2
 
-    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata", return_value=None)
+    @patch("src.fetchers.base.trafilatura.extract_metadata", return_value=None)
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
     @patch.object(XPathListAutoFetcher, "_make_request")
     def test_detail_page_error_handling(self, mock_request, mock_fetch, mock_extract_meta):
@@ -379,7 +379,7 @@ class TestXPathListAutoFetcher:
         fetcher = XPathListAutoFetcher(ContentSource(type="xpath_list_auto", src="https://example.com"))
         assert fetcher.fetch_list() is None
 
-    @patch("src.fetchers.xpath_fetcher.trafilatura.extract_metadata")
+    @patch("src.fetchers.base.trafilatura.extract_metadata")
     @patch.object(XPathListAutoFetcher, "_fetch_full_text")
     def test_fetch_items_metadata_and_empty_raw_html(self, mock_fetch, mock_meta):
         class Meta:

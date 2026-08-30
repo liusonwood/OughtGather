@@ -250,6 +250,16 @@ class TestParseConfig:
         with pytest.raises(ValueError, match="body must be a non-empty array"):
             _parse_config({"title": {"text": "Test"}, "body": "not_a_list"})
 
+    @pytest.mark.parametrize("limit", [-1, "invalid", 1.5])
+    def test_limit_must_be_non_negative_integer(self, limit):
+        data = {
+            "title": {"text": "Test"},
+            "body": [],
+            "limit": limit,
+        }
+        with pytest.raises(ValueError, match="limit must be a non-negative integer"):
+            _parse_config(data)
+
     @pytest.mark.parametrize("key", ["full_text", "goal", "model"])
     def test_fetcher_options_must_be_nested_in_metadata(self, key):
         """Fetcher 专属配置不得再出现在内容源顶层。"""
