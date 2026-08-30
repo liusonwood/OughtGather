@@ -138,6 +138,7 @@ class WeatherFetcher(BaseFetcher):
 
         title = f"{city_name}天气 {date_str}: {text_day}, {temp_min}°C - {temp_max}°C"
         description = (
+            "<div>"
             f"白天天气：{text_day}（图标：{icon_day}）<br>"
             f"夜间天气：{text_night}（图标：{icon_night}）<br>"
             f"温度：{temp_min}°C 至 {temp_max}°C<br>"
@@ -152,6 +153,7 @@ class WeatherFetcher(BaseFetcher):
             f"日出/日落：{sunrise} / {sunset}<br>"
             f"月出/月落：{moonrise} / {moonset}（月相：{moon_phase}，{moon_phase_icon}）<br>"
             f"紫外线指数：{uv_index}"
+            "</div>"
         )
         return title, description
 
