@@ -138,18 +138,20 @@ class WeatherFetcher(BaseFetcher):
 
         title = f"{city_name}天气 {date_str}: {text_day}, {temp_min}°C - {temp_max}°C"
         description = (
-            f"<p><strong>白天天气：</strong>{text_day}（图标：{icon_day}）</p>"
-            f"<p><strong>夜间天气：</strong>{text_night}（图标：{icon_night}）</p>"
-            f"<p><strong>温度：</strong>{temp_min}°C 至 {temp_max}°C</p>"
-            f"<p><strong>降水量：</strong>{precip} mm</p>"
-            f"<p><strong>云量：</strong>{cloud}%</p>"
-            f"<p><strong>湿度：</strong>{humidity}%</p>"
-            f"<p><strong>白天风力：</strong>{wind_dir_day}（{wind_360_day}°），{wind_scale_day}级，风速 {wind_speed_day} km/h</p>"
-            f"<p><strong>夜间风力：</strong>{wind_dir_night}（{wind_360_night}°），{wind_scale_night}级，风速 {wind_speed_night} km/h</p>"
-            f"<p><strong>能见度：</strong>{vis} km</p>"
-            f"<p><strong>日出/日落：</strong>{sunrise} / {sunset}</p>"
-            f"<p><strong>月出/月落：</strong>{moonrise} / {moonset}（月相：{moon_phase}，{moon_phase_icon}）</p>"
-            f"<p><strong>紫外线指数：</strong>{uv_index}</p>"
+            f"白天天气：{text_day}（图标：{icon_day}）<br>"
+            f"夜间天气：{text_night}（图标：{icon_night}）<br>"
+            f"温度：{temp_min}°C 至 {temp_max}°C<br>"
+            f"降水量：{precip} mm<br>"
+            f"云量：{cloud}%<br>"
+
+            f"湿度：{humidity}%<br><br>"
+            f"白天风力：{wind_dir_day}（{wind_360_day}°），{wind_scale_day}级，风速 {wind_speed_day} km/h<br>"
+            f"夜间风力：{wind_dir_night}（{wind_360_night}°），{wind_scale_night}级，风速 {wind_speed_night} km/h<br><br>"
+
+            f"能见度：{vis} km<br>"
+            f"日出/日落：{sunrise} / {sunset}<br>"
+            f"月出/月落：{moonrise} / {moonset}（月相：{moon_phase}，{moon_phase_icon}）<br>"
+            f"紫外线指数：{uv_index}"
         )
         return title, description
 
