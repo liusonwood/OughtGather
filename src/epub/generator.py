@@ -918,7 +918,7 @@ class EPUBGenerator:
         from src.fetchers.base import _registry
         extra_css = ""
         for name, cls in _registry.items():
-            if hasattr(cls, "custom_css") and cls.custom_css:
+            if cls.custom_css:
                 extra_css += f"\n/* --- Custom CSS from {cls.__name__} ({name}) --- */\n{cls.custom_css.strip()}\n"
 
         css = epub.EpubItem(

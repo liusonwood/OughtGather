@@ -8,7 +8,6 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
-from urllib.parse import urljoin
 import httpx
 import trafilatura
 
@@ -131,7 +130,6 @@ class BaseFetcher(ABC):
         self.max_retries = max_retries
         self.logger = get_logger()
         self._client = None
-        self._scraper = None
         self._playwright = None
         self._browser = None
         self._browser_context = None
@@ -550,9 +548,6 @@ class BaseFetcher(ABC):
             soup = BeautifulSoup(html, 'lxml')
         images = []
         
-        # 排除关键词
-        exclude_keywords = ['avatar', 'logo', 'icon', 'button', 'loading', 'spacer', 'ad_']
-
         for img in soup.find_all('img'):
             # 1. 尝试多个候选属性
             src = None
@@ -590,11 +585,6 @@ class BaseFetcher(ABC):
             if src.lower().startswith('data:') or any(ext in src.lower() for ext in ['.gif', '.svg']):
                 continue
             
-            # 排除明显的占位图/图标
-            if any(kw in src.lower() for kw in exclude_keywords):
-                # 除非它是唯一的图片或非常大，否则跳过
-                pass 
-                
             # 3. 解析为绝对路径
             full_url = self._resolve_url(src, base_url or self.source.src)
             if full_url not in images:
