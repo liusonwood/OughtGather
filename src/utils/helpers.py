@@ -204,8 +204,25 @@ def format_date(date_str: str) -> str:
 
     # 如果都解析失败，尝试使用 dateutil（如果有安装）
     try:
-        from dateutil import parser
-        dt = parser.parse(date_str)
+        from dateutil import parser, tz
+
+        # 提供常见时区缩写映射，避免 UnknownTimezoneWarning
+        # （未来版本 dateutil 会将此 warning 升级为 exception）
+        _TZINFOS = {
+            # 北美时区
+            "EST": tz.gettz("America/New_York"),
+            "EDT": tz.gettz("America/New_York"),
+            "CST": tz.gettz("America/Chicago"),
+            "CDT": tz.gettz("America/Chicago"),
+            "MST": tz.gettz("America/Denver"),
+            "MDT": tz.gettz("America/Denver"),
+            "PST": tz.gettz("America/Los_Angeles"),
+            "PDT": tz.gettz("America/Los_Angeles"),
+            # 通用 UTC
+            "UT": tz.UTC,
+        }
+
+        dt = parser.parse(date_str, tzinfos=_TZINFOS)
         return _format_dt(dt)
     except (ImportError, ValueError, TypeError, OverflowError):
         # 最后手段：返回原始字符串
