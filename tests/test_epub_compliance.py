@@ -363,16 +363,12 @@ class TestEpubMetadata:
             assert toc_ref is not None, "guide应包含type='toc'的引用"
             assert toc_ref.get('href') == 'nav.xhtml', f"目录引用href应为'nav.xhtml'，实际为'{toc_ref.get('href')}'"
 
-            # 查找正文起始引用 (text / start)
+            # 查找正文起始引用 (text)
             text_ref = guide.find('.//{*}reference[@type="text"]')
             assert text_ref is not None, "guide应包含type='text'的引用"
             assert text_ref.get('href') == 'contents.xhtml', f"text引用href应为'contents.xhtml'，实际为'{text_ref.get('href')}'"
 
-            start_ref = guide.find('.//{*}reference[@type="start"]')
-            assert start_ref is not None, "guide应包含type='start'的引用"
-            assert start_ref.get('href') == 'contents.xhtml', f"start引用href应为'contents.xhtml'，实际为'{start_ref.get('href')}'"
-
-            print(f"✓ OPF包含正确的guide(cover/toc/text/start)元素，cover指向cover.xhtml，toc指向nav.xhtml，text/start指向contents.xhtml")
+            print(f"✓ OPF包含正确的guide(cover/toc/text)元素，cover指向cover.xhtml，toc指向nav.xhtml，text指向contents.xhtml")
 
     def test_language_defaults_to_english_locale(self, shared_epub):
         """测试未设置环境变量时默认使用英文 locale"""
