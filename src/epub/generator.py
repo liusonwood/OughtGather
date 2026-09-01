@@ -123,11 +123,10 @@ class EPUBGenerator:
 
         # 13. 设置 Guide 元素
         # 将 toc 指向隐藏的 nav.xhtml，保护 contents.xhtml 不被 Kindle 识别为 frontmatter 跳过；
-        # 将 contents.xhtml 标记为正文起点 (text / start)，cover 指向 cover.xhtml。
+        # 将 contents.xhtml 标记为正文起点 (text)，cover 指向 cover.xhtml。
         guide = [
             {'href': 'nav.xhtml', 'title': self.translator("navigation.table_of_contents"), 'type': 'toc'},
             {'href': 'contents.xhtml', 'title': self.translator("navigation.start_of_content"), 'type': 'text'},
-            {'href': 'contents.xhtml', 'title': self.translator("navigation.start_of_content"), 'type': 'start'},
         ]
         if self.cover_page is not None:
             guide.insert(0, {'href': 'cover.xhtml', 'title': self.translator("navigation.cover"), 'type': 'cover'})
@@ -150,7 +149,7 @@ class EPUBGenerator:
         book.add_author('Ought Gather')
 
     def _add_cover(self, book: epub.EpubBook):
-        """添加封面：manifest 封面图片 + 真实封面页 cover.xhtml (spine 第 1 项，非线性)"""
+        """添加封面：manifest 封面图片 + 真实封面页 cover.xhtml"""
         try:
             cover_filename, cover_data = self.cover_generator.generate()
 
@@ -184,12 +183,10 @@ class EPUBGenerator:
     <img src="{cover_filename}" alt="{safe_title}"/>
 </body>
 </html>"""
-            # 设置为非线性页：Kindle 打开时跳过非线性项，直接进入第一线性页 contents.xhtml
-            cover_page.is_linear = False
             book.add_item(cover_page)
             self.cover_page = cover_page
 
-            self.logger.info("Cover image + cover.xhtml (spine non-linear) added")
+            self.logger.info("Cover image + cover.xhtml added")
         except Exception as e:
             self.logger.error(f"Failed to add cover: {e}")
             self.cover_page = None
@@ -821,7 +818,7 @@ class EPUBGenerator:
         nav_tag_start = f'<nav epub:type="toc" id="toc">' if is_nav else '<div id="toc">'
         nav_tag_end = '</nav>' if is_nav else '</div>'
 
-        body_attrs = 'style="padding: 1em;"' if is_nav else 'style="padding: 1em;" epub:type="bodymatter"'
+        body_attrs = 'style="padding: 1em;"'
 
         content = f"""<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{self.translator.locale}" xml:lang="{self.translator.locale}">
@@ -836,9 +833,6 @@ class EPUBGenerator:
 """
         for item in toc:
             if isinstance(item, epub_lib.Link):
-                # 过滤掉目录页自身的自引用链接（该链接用于 NCX 导航首项，在视觉目录中无需重复展示）
-                if item.href == 'contents.xhtml':
-                    continue
                 # 扁平链接（如 summary），使用大章节样式
                 link_html = f'<a class="section-link" href="{item.href}" style="{STYLE_SECTION_LINK}">{ContentProcessor.render_text_with_emojis(item.title)}</a>'
                 if not is_nav:
