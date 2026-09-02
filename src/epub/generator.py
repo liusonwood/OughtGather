@@ -833,6 +833,9 @@ class EPUBGenerator:
 """
         for item in toc:
             if isinstance(item, epub_lib.Link):
+                # 过滤掉目录页自身的自引用链接（该链接用于 NCX 导航首项，在视觉目录中无需重复展示）
+                if item.href == 'contents.xhtml':
+                    continue
                 # 扁平链接（如 summary），使用大章节样式
                 link_html = f'<a class="section-link" href="{item.href}" style="{STYLE_SECTION_LINK}">{ContentProcessor.render_text_with_emojis(item.title)}</a>'
                 if not is_nav:
