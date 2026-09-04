@@ -197,6 +197,16 @@ class TestEpubContent:
 
         print(f"✓ nav.xhtml包含hidden的landmarks地标导航（cover+toc+bodymatter配置正确，Kindle兼容）")
 
+    def test_toc_self_reference_is_hidden_in_contents(self, shared_epub):
+        """物理目录页保留 Kindle 所需自引用，但不显示给读者。"""
+        nav_html = self._read_epub_xhtml(shared_epub, 'nav.xhtml')
+        contents_html = self._read_epub_xhtml(shared_epub, 'contents.xhtml')
+
+        assert 'href="contents.xhtml"' in nav_html
+        assert 'href="contents.xhtml" aria-hidden="true" tabindex="-1"' in contents_html
+        assert 'id="toc_contents" style="display: none;"' in contents_html
+
+
     def test_chapter_has_doctype(self, shared_epub):
         """测试章节XHTML包含DOCTYPE声明"""
         chapter_html = self._read_epub_xhtml(shared_epub, 'chapter_0.xhtml')

@@ -833,8 +833,20 @@ class EPUBGenerator:
 """
         for item in toc:
             if isinstance(item, epub_lib.Link):
-                # 过滤掉目录页自身的自引用链接（该链接用于 NCX 导航首项，在视觉目录中无需重复展示）
-                if item.href == 'contents.xhtml':
+                # Kindle 的部分版本会扫描物理目录页中的自引用，以识别目录
+                # 入口和起始位置。因此保留该链接，但只在视觉目录页中隐藏；
+                # nav.xhtml 中则正常显示，供阅读器导航使用。
+                if not is_nav and item.href == 'contents.xhtml':
+                    hidden_link = (
+                        f'<a class="section-link" href="{item.href}" '
+                        f'aria-hidden="true" tabindex="-1" '
+                        f'style="display: none;">'
+                        f'{ContentProcessor.render_text_with_emojis(item.title)}</a>'
+                    )
+                    content += (
+                        f'            <li id="toc_{item.uid}" '
+                        f'style="display: none;">{hidden_link}</li>\n'
+                    )
                     continue
                 # 扁平链接（如 summary），使用大章节样式
                 link_html = f'<a class="section-link" href="{item.href}" style="{STYLE_SECTION_LINK}">{ContentProcessor.render_text_with_emojis(item.title)}</a>'
