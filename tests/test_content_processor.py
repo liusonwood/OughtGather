@@ -471,16 +471,36 @@ class TestEpubValidationFixes:
         assert "<font" not in result.content
 
     def test_font_to_span_with_multiple_attrs(self):
-        """<font color='blue' face='Arial'> 应转换多个属性，但忽略 color"""
+        """<font color='blue' face='Arial' size='5'> 应转换 size，但忽略 color 和 face 自定义字体"""
         source = ContentSource(type="rss", src="https://example.com/rss")
         processor = ContentProcessor(source)
-        html = "<font color='blue' face='Arial'>蓝色Arial</font>"
+        html = "<font color='blue' face='Arial' size='5'>蓝色Arial</font>"
         article = _make_article(html)
         result = processor.process(article)
         assert "<span" in result.content
         assert "color" not in result.content  # 忽略颜色
-        assert "font-family:Arial" in result.content
+        assert "font-size:18px" in result.content  # 保留字号
+        assert "font-family" not in result.content  # 过滤自定义字体
         assert "<font" not in result.content
+
+    def test_strip_custom_font_styles(self):
+        """应从 style 属性中移除 font-family、font 及标签 face 属性，只使用默认字体"""
+        source = ContentSource(type="rss", src="https://example.com/rss")
+        processor = ContentProcessor(source)
+        html = (
+            '<h5 style="font-family: ExtraLight-0; font-size: 14px; font-weight: 300;">标题</h5>'
+            '<p style="font-family: Arial, Helvetica, sans-serif; font-weight: bold;">正文</p>'
+            '<blockquote style="font-family: mp-quote, PingFang SC;">引用</blockquote>'
+            '<span face="CustomFont">内容</span>'
+        )
+        article = _make_article(html)
+        result = processor.process(article)
+        assert "font-family" not in result.content
+        assert "ExtraLight-0" not in result.content
+        assert "mp-quote" not in result.content
+        assert 'face=' not in result.content
+        assert "font-size:14px" in result.content
+        assert "font-weight:bold" in result.content or "font-weight: bold" in result.content
 
     def test_strip_inline_color_styles(self):
         """应从 style 属性中移除 color 和 background-color"""
