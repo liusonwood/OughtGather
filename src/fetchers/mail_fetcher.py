@@ -142,6 +142,7 @@ class MailFetcher(BaseFetcher):
         message
         count
         emails {
+          id
           subject
           from
           to
@@ -209,10 +210,14 @@ class MailFetcher(BaseFetcher):
         # 清洗 HTML，确保能被 ebooklib 正确解析为 XHTML
         html_content = self._sanitize_html(html_content)
 
+        # 构造邮件唯一 URL，避免同一发件人因重复 URL 被去重机制过滤
+        email_id = email.get("id") or str(email.get("timestamp", ""))
+        article_url = f"mailto:{from_addr}?id={email_id}" if email_id else f"mailto:{from_addr}"
+
         return Article(
             title=subject,
             content=html_content,
-            url=f"mailto:{from_addr}",
+            url=article_url,
             author=from_addr,
             published_date=timestamp,
             images=images,
