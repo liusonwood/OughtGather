@@ -620,17 +620,16 @@ class ContentProcessor:
         for cell in soup.find_all('cell'):
             cell.name = 'td'
 
-        # <font> → <span>，保留样式属性
+        # <font> → <span>，保留样式属性（过滤掉自定义字体 face，只使用统一默认字体）
         for font in soup.find_all('font'):
             font.name = 'span'
-            # 将 face/size 转换为 style
+            # 将 size 转换为 style，移除 face 自定义字体
             style_parts = []
             # 忽略 color 属性以避免在 Kindle 上显示为灰色
             if font.get('color'):
                 del font['color']
                 
             if font.get('face'):
-                style_parts.append(f"font-family:{font['face']}")
                 del font['face']
             if font.get('size'):
                 # HTML font size 1-7 转换为 px
@@ -641,13 +640,18 @@ class ContentProcessor:
             if style_parts:
                 font['style'] = ';'.join(style_parts)
 
-        # 清洗所有标签的 style 属性，移除颜色设置以及对非 img 标签的布局约束
+        # 移除可能存在于其它标签上的 face 属性
+        for tag in soup.find_all(attrs={'face': True}):
+            del tag['face']
+
+        # 清洗所有标签的 style 属性，移除颜色设置、自定义字体以及对非 img 标签的布局约束
         layout_properties_to_remove = {
             'width', 'height', 'min-width', 'max-width', 'min-height', 'max-height',
             'margin', 'margin-top', 'margin-bottom', 'margin-left', 'margin-right',
             'padding', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right',
             'position', 'top', 'bottom', 'left', 'right', 'float', 'clear',
-            'display', 'flex', 'grid', 'border', 'background', 'background-image'
+            'display', 'flex', 'grid', 'border', 'background', 'background-image',
+            'font-family', 'font'
         }
 
         for tag in soup.find_all(True):
@@ -657,6 +661,8 @@ class ContentProcessor:
                 style_str = re.sub(r'(?i)(expression|url|behavior|@import|-moz-binding)\s*\(.*?\)', '', style_str)
                 # 移除 color 和 background-color 属性
                 new_style = re.sub(r'(?i)\b(background-)?color\s*:[^;]+(;|$)', '', style_str)
+                # 移除 font-family 属性，过滤自定义字体以使用电子书统一默认字体
+                new_style = re.sub(r'(?i)\bfont-family\s*:[^;]+(;|$)', '', new_style)
                 
                 # 如果不是 img 标签，进一步移除布局和尺寸相关限制属性
                 if tag.name != 'img':
