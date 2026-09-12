@@ -75,6 +75,8 @@ Once successful:
 - The EPUB is sent via email to your `KINDLE_EMAIL`.
 - `data/fetched_urls.txt` is updated in the GitHub Actions cache for deduplication on the next run.
 
+> **Note**: `Fresh Start Deduplication` is used to generate deduplication records by only fetching content without delivering. Use it before your first run to avoid sending an overwhelming backlog of articles on the initial scheduled run, or during debugging to reset the deduplication records.
+
 ### Change Language
 
 See the [Secrets Configuration](#secrets-configuration) section below to configure the `EPUB_LANGUAGE` variable.
@@ -336,7 +338,7 @@ Refer to [docs/TESTING.md](docs/TESTING.md) and [docs/EPUB_COMPLIANCE.md](docs/E
 
 ## Developing a New Fetcher
 
-The project is structured with a modular, plugin-based architecture. To add a new content source, simply drop a file in the `src/fetchers/` directory.
+The project is structured with a modular, plugin-based architecture. To add a new content source, simply drop a file in the `src/fetchers/` directory. For the complete development guide, refer to [docs/FETCHER_DEVELOPMENT.md](docs/FETCHER_DEVELOPMENT.md).
 
 ### Development Guidelines
 

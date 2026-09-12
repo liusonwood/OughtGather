@@ -75,6 +75,8 @@ Actions -> Daily Gather -> Run workflow
 - EPUB 通过邮件发送到 `KINDLE_EMAIL`
 - `data/fetched_urls.txt` 在actions缓存，用于下次去重
 
+>注：`Fresh Start Deduplication` 用于去重文件生成，只抓取不推送。用在第一次抓取前避免第一次定时运行推送太多文章；或者调试时清空去重文件。
+
 ### 修改语言
 
 见下文[Secrets 配置](#secrets-配置) ：配置`EPUB_LANGUAGE`变量
@@ -339,7 +341,7 @@ python3.11 -m pytest tests/test_integration.py::TestEpubcheckValidation -v
 
 ## 开发新的 Fetcher
 
-项目采用插件化抓取器架构，新增内容源类型只需在 `src/fetchers/` 添加一个文件，无需修改主入口。
+项目采用插件化抓取器架构，新增内容源类型只需在 `src/fetchers/` 添加一个文件，无需修改主入口。完整开发指南请参阅 [docs/FETCHER_DEVELOPMENT.md](docs/FETCHER_DEVELOPMENT.md)。
 
 ### 开发规则
 
