@@ -156,7 +156,7 @@ on:
 
 | Secret / 环境变量 | 说明 |
 | --- | --- |
-| `CONFIG_JSON` | 完整的 `config.json` 字符串；优先级高于项目根目录的 `config.json` 文件。推荐在 GitHub Actions 中使用，可避免将私有内容源写入仓库 |
+| `CONFIG_JSON` | 完整的 `config.json` 字符串；优先级高于项目根目录的 `config.json` 文件。推荐在 GitHub Actions 中使用，可避免将私有内容源写入仓库。**项目提供了一个可视化 HTML [配置编辑器](https://liusonwood.github.io/OughtGather/)。** |
 | `EPUB_LANGUAGE` | 可选 EPUB/Bing locale，例如 `en-US` 或 `zh-CN`；未设置或无效时使用英文 `en-US` |
 | `KINDLE_EMAIL` | Kindle 接收邮箱（`@kindle.com`） |
 | `SMTP_HOST` | 发件邮箱 SMTP 服务器地址，如 `smtp.gmail.com` |

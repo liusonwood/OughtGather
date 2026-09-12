@@ -156,7 +156,7 @@ Configure these in your GitHub repository under `Settings -> Secrets and variabl
 
 | Secret / Env Var | Description |
 | --- | --- |
-| `CONFIG_JSON` | A complete `config.json` string representation. This overrides the root directory's `config.json` file. Highly recommended for GitHub Actions deployment to avoid hardcoding feed secrets into the codebase. |
+| `CONFIG_JSON` | A complete `config.json` string representation. This overrides the root directory's `config.json` file. Highly recommended for GitHub Actions deployment to avoid hardcoding feed secrets into the codebase. **The project provides a visual HTML [Config Editor](https://liusonwood.github.io/OughtGather/).** |
 | `EPUB_LANGUAGE` | Optional EPUB/Bing locale, such as `en-US` or `zh-CN`. It controls EPUB system text and Bing's wallpaper region; missing or invalid values use English (`en-US`). |
 | `KINDLE_EMAIL` | Your Kindle device email address (`@kindle.com`) |
 | `SMTP_HOST` | Outgoing SMTP server address (e.g., `smtp.gmail.com`) |
