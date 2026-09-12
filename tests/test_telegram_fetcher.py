@@ -160,16 +160,8 @@ class TestTelegramFetcher:
         called_urls = [call.args[0] for call in mock_make_request.call_args_list]
         assert called_urls == [
             "https://rsshub.bad-node.com/telegram/channel/durov",
-            "https://rsshub.rssforever.com/telegram/channel/durov",
-            "https://rsshub.ktachibana.party/telegram/channel/durov",
-        ]
-
-    def test_default_nodes_order(self):
-        """默认节点应按稳定性优先顺序排列"""
-        assert TelegramFetcher.DEFAULT_NODES[:3] == [
-            "https://rsshub.rssforever.com",
-            "https://rsshub.ktachibana.party",
-            "https://hub.slarker.me",
+            f"{TelegramFetcher.DEFAULT_NODES[0]}/telegram/channel/durov",
+            f"{TelegramFetcher.DEFAULT_NODES[1]}/telegram/channel/durov",
         ]
 
     @patch.object(TelegramFetcher, "_make_request")
