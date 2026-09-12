@@ -1,9 +1,9 @@
 {
   "title": {
-    "text": "{每日新闻</br>{time}}",
+    "text": "{OughtGather</br>{time}}",
     "img": ""
   },
-  "limit": 5,
+  "limit": 15,
   "body": [
     {
       "type": "rss",
