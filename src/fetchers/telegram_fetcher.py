@@ -19,11 +19,11 @@ class TelegramFetcher(BaseFetcher):
     # 默认公用 RSSHub 节点池，用于故障转移 (Failover) 
     # 测试 RSSHub 节点使用scripts/test_rsshub_instances.py
     DEFAULT_NODES = [
-        "https://rsshub.rssforever.com",
         "https://rsshub.ktachibana.party",
         "https://hub.slarker.me",
         "https://rss.peachyjoy.top",
         "https://rsshub.umzzz.com",
+        "https://rsshub.rssforever.com",
         "https://rsshub.isrss.com",
         "https://rsshub.asailor.org",
         "https://rsshub.cups.moe",
