@@ -63,7 +63,7 @@ Ought Gather 是一个 Python 自动化信息聚合工具。它从 RSS、网页�
 
 见下方 [Secrets 配置](#secrets-配置) 一节。
 
-**3. 手动触发一次**
+**3. 手动触发**
 
 ```text
 Actions -> Daily Gather -> Run workflow
@@ -75,6 +75,10 @@ Actions -> Daily Gather -> Run workflow
 - EPUB 通过邮件发送到 `KINDLE_EMAIL`
 - `data/fetched_urls.txt` 在actions缓存，用于下次去重
 
+### 修改语言
+
+见下文[Secrets 配置](#secrets-配置) ：配置`EPUB_LANGUAGE`变量
+
 ### 修改运行时间
 
 通过 Cloudflare Workers 定时触发 GitHub Actions，触发时间比 GitHub 自带的 `schedule` 更精准（误差通常在 1 分钟以内）。`schedule` 保留为保底备用，且会在外部触发后 12 小时内自动跳过，避免重复执行。
@@ -83,7 +87,7 @@ Actions -> Daily Gather -> Run workflow
 
 **第一步：修改运行时间代码**
 
-修改 `wrangler.toml` 中的 Cron 时间为你需要的触发时间（UTC 时区）：
+修改 `cloudflare-worker/wrangler.toml` 中的 Cron 时间为你需要的触发时间（UTC 时区）：
 
 ```toml
 [triggers]
@@ -420,30 +424,13 @@ python3.11 scripts/update_workflow_secrets.py
 ```
 
 ---
-
-## 📚 项目文档
-
-为了帮助您更好地安装、配置、运维及参与本项目，请参考以下全套文档：
-
-- **核心使用与配置**
-  - [📖 配置指南 (CONFIG.md)](docs/CONFIG.md) — 详细的 `config.json` 字段说明、过滤规则及各内容源配置。
-- **开发与社区**
-  - [🏗️ 项目设计文档 (design.md)](docs/design.md) — 系统架构、内容清洗流水线及 EPUB 生成逻辑。
-  - [✅ 测试指南 (TESTING.md)](docs/TESTING.md) — 如何运行自动化测试、编写测试用例及查看覆盖率。
-  - [🤝 贡献指南 (CONTRIBUTING.md)](.github/CONTRIBUTING.md) — 代码风格、插件化开发规范及时区约束。
-  - [📜 行为准则 (CODE_OF_CONDUCT.md)](.github/CODE_OF_CONDUCT.md) — 社区交流标准。
-  - [🛡️ 安全策略 (SECURITY.md)](.github/SECURITY.md) — 如何安全地报告漏洞及保护您的私有凭证。
-  - [🙋 支持指南 (SUPPORT.md)](.github/SUPPORT.md) — 获取技术支持的正式渠道。
- 
----
-
 ## 项目结构
 
 ```text
 .
 ├── LICENSE
 ├── README.md
-├── cloudflare- worker/ # worker部署触发器
+├── cloudflare-worker/ # worker部署触发器
 ├── config-editor.html
 ├── config.json
 ├── config.template.json
