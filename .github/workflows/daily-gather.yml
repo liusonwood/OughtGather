@@ -163,7 +163,8 @@ jobs:
           python -u src/main.py
 
       - name: Upload EPUB artifact
-        if: always()
+        # 仅在手动触发时上传 EPUB，自动触发（外部触发器或 cron 定时）不上传
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v6
         with:
           name: epub-files

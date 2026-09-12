@@ -63,7 +63,7 @@ Click the `Fork` button on GitHub to copy the project to your own account.
 
 See the [Secrets Configuration](#secrets-configuration) section below.
 
-**3. Manually Run Once to Verify**
+**3. Manually Trigger**
 
 ```text
 Actions -> Daily Gather -> Run workflow
@@ -75,6 +75,10 @@ Once successful:
 - The EPUB is sent via email to your `KINDLE_EMAIL`.
 - `data/fetched_urls.txt` is updated in the GitHub Actions cache for deduplication on the next run.
 
+### Change Language
+
+See the [Secrets Configuration](#secrets-configuration) section below to configure the `EPUB_LANGUAGE` variable.
+
 ### Customizing Run Schedules
 
 We recommend triggering the workflow via Cloudflare Workers for precise cron executions (typically within 1 minute accuracy). The built-in GitHub Actions `schedule` serves as a fallback and automatically skips itself if an external run happened within the previous 12 hours to prevent duplicate deliveries.
@@ -83,7 +87,7 @@ We recommend triggering the workflow via Cloudflare Workers for precise cron exe
 
 **Step 1: Modify Trigger Cron**
 
-Change the Cron timing in `wrangler.toml` to your desired delivery time (UTC):
+Change the Cron timing in `cloudflare-worker/wrangler.toml` to your desired delivery time (UTC):
 
 ```toml
 [triggers]
@@ -417,23 +421,6 @@ python3.11 scripts/update_workflow_secrets.py
 ```
 
 ---
-
-## 📚 Project Documentation
-
-To help you better install, configure, maintain, and contribute to this project, please refer to the complete set of documentation below:
-
-- **Core Usage & Configuration**
-  - [📖 Configuration Guide (CONFIG.md)](docs/CONFIG.md) — Detailed description of `config.json` fields, filtering rules, and source-specific settings.
-- **Development & Community**
-  - [🏗️ Design Document (design.md)](docs/design.md) — System architecture, content cleaning pipelines, and EPUB generation logic.
-  - [✅ Testing Guide (TESTING.md)](docs/TESTING.md) — How to run automated tests, write test cases, and check coverage.
-  - [🤝 Contributing Guidelines (CONTRIBUTING.md)](.github/CONTRIBUTING.md) — Code style, plugin development mandates, and timezone constraints.
-  - [📜 Code of Conduct (CODE_OF_CONDUCT.md)](.github/CODE_OF_CONDUCT.md) — Standards for community interaction.
-  - [🛡️ Security Policy (SECURITY.md)](.github/SECURITY.md) — How to report vulnerabilities and protect your private credentials.
-  - [🙋 Support Guidelines (SUPPORT.md)](.github/SUPPORT.md) — Official channels for technical support.
-
----
-
 ## Directory Structure
 
 ```text
