@@ -75,8 +75,8 @@ class EPUBGenerator:
         # 6. 生成目录数据
         toc = self.toc_generator.generate(sections)
         book.toc = toc
-        # 将 contents.xhtml 设为 NCX 目录首项，防止部分 Kindle 转制路径将 NCX 首项(原为 divider_0)当作正文起点
-        book.toc.insert(0, epub.Link("contents.xhtml", self.translator("navigation.contents"), "contents"))
+        # 将 overview.xhtml 设为 NCX/TOC 目录首项（作为电子书正文第一节/今日导读）
+        book.toc.insert(0, epub.Link("overview.xhtml", self.translator("navigation.overview"), "overview"))
 
         # 初始化 spine
         book.spine = []
@@ -105,28 +105,40 @@ class EPUBGenerator:
         nav.add_link(href='style/default.css', rel='stylesheet')
         book.add_item(nav)
 
-        # 11. 生成并添加物理目录页 contents.xhtml
-        contents = epub.EpubHtml(title=self.translator("navigation.contents"), file_name='contents.xhtml', uid='contents', lang=self.translator.locale)
-        contents.content = self._generate_nav_content(book.title, book.toc, is_nav=False)
-        contents.add_link(href='style/default.css', rel='stylesheet')
-        book.add_item(contents)
+        # 11. 生成并添加今日导读/目录总览页 overview.xhtml
+        overview = epub.EpubHtml(
+            title=self.translator("navigation.overview"),
+            file_name='overview.xhtml',
+            uid='overview',
+            lang=self.translator.locale
+        )
+        overview.content = self._generate_nav_content(book.title, book.toc, is_nav=False)
+        overview.add_link(href='style/default.css', rel='stylesheet')
+        book.add_item(overview)
 
-        # Kindle（Send to Kindle 转制）以 spine 的第一个 linear 项作为首次打开位置。
-        # 因此 contents.xhtml 必须为 spine[0]；cover.xhtml 不进入 spine，
-        # 仅保留在 manifest 与 guide/landmarks 中，Kindle 会根据 cover-image 自动在书库与菜单中展示封面。
+        # Kindle（Send to Kindle 转制）以 TOC 首项及 spine[0] 探测 SRL。
+        # overview.xhtml 作为首节正文（避开 contents/toc 等 frontmatter 触发词），
+        # 确保 Kindle 打开新书时 100% 精准落在此页。
+        # cover.xhtml 作为非线性辅助页面 (linear="no") 置于 spine 末尾，既符合 EPUB 3
+        # landmarks 引用必须在 spine 中的合规性要求（W3C EPUBCheck RSC-011），
+        # 又绝对不会影响首屏阅读位置（Kindle 首次打开落点严格为 spine[0] 和 SRL）。
         if isinstance(book.spine, list):
-            book.spine.insert(0, contents)
+            book.spine.insert(0, overview)
+            if self.cover_page is not None and self.cover_page not in book.spine:
+                self.cover_page.is_linear = False
+                book.spine.append(self.cover_page)
         else:
-            book.spine = [contents] + list(book.spine)
+            book.spine = [overview] + list(book.spine) + ([self.cover_page] if self.cover_page is not None else [])
 
         # 12. 添加样式
         self._add_style(book)
 
         # 13. 设置 Guide 元素
-        # 将 text 引用放在首位，确保优先被读取；toc 指向 nav.xhtml，保护 contents.xhtml 不被识别为 frontmatter 跳过；
-        # cover 放在末尾作为辅助引用。
+        # start 与 text 明确指定 overview.xhtml 为起始阅读位置 (SRL)；
+        # toc 指向 nav.xhtml（保护 overview.xhtml 不被当成 frontmatter 跳过）；cover 指向 cover.xhtml。
         guide = [
-            {'href': 'contents.xhtml', 'title': self.translator("navigation.start_of_content"), 'type': 'text'},
+            {'href': 'overview.xhtml', 'title': self.translator("navigation.overview"), 'type': 'start'},
+            {'href': 'overview.xhtml', 'title': self.translator("navigation.start_of_content"), 'type': 'text'},
             {'href': 'nav.xhtml', 'title': self.translator("navigation.table_of_contents"), 'type': 'toc'},
         ]
         if self.cover_page is not None:
@@ -817,7 +829,7 @@ class EPUBGenerator:
         )
         STYLE_NESTED_LI = "margin: 0.2em 0;"
 
-        nav_tag_start = f'<nav epub:type="toc" id="toc">' if is_nav else '<section id="toc" epub:type="bodymatter" style="padding: 1em;">'
+        nav_tag_start = f'<nav epub:type="toc" id="toc">' if is_nav else '<section id="overview" epub:type="bodymatter" style="padding: 1em;">'
         nav_tag_end = '</nav>' if is_nav else '</section>'
 
         if is_nav:
@@ -838,10 +850,10 @@ class EPUBGenerator:
 """
         for item in toc:
             if isinstance(item, epub_lib.Link):
-                # Kindle 的部分版本会扫描物理目录页中的自引用，以识别目录
-                # 入口和起始位置。因此保留该链接，但只在视觉目录页中隐藏；
+                # Kindle 的部分版本会扫描物理导读页中的自引用，以识别目录
+                # 入口和起始位置。因此保留该链接，但只在视觉导读页中隐藏；
                 # nav.xhtml 中则正常显示，供阅读器导航使用。
-                if not is_nav and item.href == 'contents.xhtml':
+                if not is_nav and item.href == 'overview.xhtml':
                     hidden_link = (
                         f'<a class="section-link" href="{item.href}" '
                         f'aria-hidden="true" tabindex="-1" '
@@ -882,13 +894,13 @@ class EPUBGenerator:
 
         if is_nav:
             content += f"""
-    <!-- EPUB 3.0 landmarks: cover -> cover.xhtml, toc -> nav.xhtml, bodymatter -> contents.xhtml -->
-    <!-- toc 指向 nav.xhtml（避免 contents.xhtml 被误判为 frontmatter 跳过），bodymatter 指向 contents.xhtml -->
+    <!-- EPUB 3.0 landmarks: cover -> cover.xhtml, toc -> overview.xhtml, bodymatter -> overview.xhtml -->
+    <!-- 所有 landmarks 目标必须是 spine 中的项目（符合 EPUB 3.3 RSC-011 规范） -->
     <nav epub:type=\"landmarks\" id=\"landmarks\" hidden=\"\">
         <ol>
             <li><a epub:type=\"cover\" href=\"cover.xhtml\">{self.translator('navigation.cover')}</a></li>
-            <li><a epub:type=\"toc\" href=\"nav.xhtml\">{self.translator('navigation.table_of_contents')}</a></li>
-            <li><a epub:type=\"bodymatter\" href=\"contents.xhtml\">{self.translator('navigation.start_of_content')}</a></li>
+            <li><a epub:type=\"toc\" href=\"overview.xhtml\">{self.translator('navigation.table_of_contents')}</a></li>
+            <li><a epub:type=\"bodymatter\" href=\"overview.xhtml\">{self.translator('navigation.overview')}</a></li>
         </ol>
     </nav>
 """
@@ -1055,49 +1067,49 @@ pre code {
     word-break: inherit;
 }
 
-/* 目录 (nav.xhtml) 专属样式 */
-#toc h1 {
+/* 目录 (nav.xhtml) 与导读 (overview.xhtml) 专属样式 */
+#toc h1, #overview h1 {
     text-align: center;
     font-size: 1.4em;
     margin-bottom: 0.5em;
     border-bottom: 2px solid #333;
     padding-bottom: 0.3em;
 }
-#toc ol {
+#toc ol, #overview ol {
     list-style-type: none;
     margin: 0;
     padding: 0;
 }
-#toc li {
+#toc li, #overview li {
     margin: 0.8em 0;
 }
-#toc h2 {
+#toc h2, #overview h2 {
     font-size: 1.2em !important;
     font-weight: bold !important;
     margin-top: 0.4em !important;
     margin-bottom: 0.2em !important;
     padding: 0 !important;
 }
-#toc .section-link {
+#toc .section-link, #overview .section-link {
   font-weight: bold !important;
   font-size: 1.2em !important;
   color: #111111 !important;
   display: block;
   text-decoration: none !important;
 }
-#toc h2 .section-link {
+#toc h2 .section-link, #overview h2 .section-link {
   font-size: 1em !important;
   font-weight: inherit !important;
   margin: 0 !important;
 }
 
-#toc .article-link { 
+#toc .article-link, #overview .article-link { 
     font-weight: normal !important; 
     font-size: 1.0em !important; 
     color: #0066cc !important; 
     text-decoration: none !important;
 }
-#toc li ol { 
+#toc li ol, #overview li ol { 
     margin-left: 1em; 
     list-style-type: none; 
     border-left: 2px solid #eee;
@@ -1105,7 +1117,7 @@ pre code {
     margin-top: 0.4em;
     margin-bottom: 0.4em;
 }
-#toc li ol li {
+#toc li ol li, #overview li ol li {
     margin: 0.4em 0;
 }
 """ + extra_css

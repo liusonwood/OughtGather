@@ -16,7 +16,7 @@ class TestEPUBHelpers:
         """测试生成返回目录超链接"""
         link_html = generate_toc_link("toc_chapter_1", EPUBTranslator("zh-CN"))
         assert 'class="toc-link"' in link_html
-        assert 'href="contents.xhtml#toc_chapter_1"' in link_html
+        assert 'href="overview.xhtml#toc_chapter_1"' in link_html
         assert "返回目录" in link_html
         assert "style" not in link_html
 
@@ -41,7 +41,7 @@ class TestEPUBHelpers:
         content = divider.content
         assert "<title>测试大栏目 &amp; 频道</title>" in content
         assert "<h2>测试大栏目 &amp; 频道</h2>" in content
-        assert 'href="contents.xhtml#toc_section_99"' in content
+        assert 'href="overview.xhtml#toc_section_99"' in content
         assert "返回目录" in content
         assert 'class="toc-link"' in content
 

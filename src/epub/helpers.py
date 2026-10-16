@@ -23,7 +23,7 @@ def generate_toc_link(target_id: str, translator: EPUBTranslator = None) -> str:
         str: HTML 片段
     """
     translator = translator or EPUBTranslator()
-    return f'<p class=\"toc-link\"><a href=\"contents.xhtml#{target_id}\">{translator("navigation.back_to_contents")}</a></p>'
+    return f'<p class=\"toc-link\"><a href=\"overview.xhtml#{target_id}\">{translator("navigation.back_to_contents")}</a></p>'
 
 
 def create_section_divider_page(
