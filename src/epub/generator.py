@@ -111,25 +111,26 @@ class EPUBGenerator:
         contents.add_link(href='style/default.css', rel='stylesheet')
         book.add_item(contents)
 
+        # Kindle（Send to Kindle 转制）以 spine 的第一个 linear 项作为首次打开位置。
+        # 因此 contents.xhtml 必须为 spine[0]；cover.xhtml 不进入 spine，
+        # 仅保留在 manifest 与 guide/landmarks 中，Kindle 会根据 cover-image 自动在书库与菜单中展示封面。
         if isinstance(book.spine, list):
             book.spine.insert(0, contents)
-            if self.cover_page is not None:
-                book.spine.insert(0, self.cover_page)
         else:
-            book.spine = ([self.cover_page] if self.cover_page is not None else []) + [contents]
+            book.spine = [contents] + list(book.spine)
 
         # 12. 添加样式
         self._add_style(book)
 
         # 13. 设置 Guide 元素
-        # 将 toc 指向隐藏的 nav.xhtml，保护 contents.xhtml 不被 Kindle 识别为 frontmatter 跳过；
-        # 将 contents.xhtml 标记为正文起点 (text)，cover 指向 cover.xhtml。
+        # 将 text 引用放在首位，确保优先被读取；toc 指向 nav.xhtml，保护 contents.xhtml 不被识别为 frontmatter 跳过；
+        # cover 放在末尾作为辅助引用。
         guide = [
-            {'href': 'nav.xhtml', 'title': self.translator("navigation.table_of_contents"), 'type': 'toc'},
             {'href': 'contents.xhtml', 'title': self.translator("navigation.start_of_content"), 'type': 'text'},
+            {'href': 'nav.xhtml', 'title': self.translator("navigation.table_of_contents"), 'type': 'toc'},
         ]
         if self.cover_page is not None:
-            guide.insert(0, {'href': 'cover.xhtml', 'title': self.translator("navigation.cover"), 'type': 'cover'})
+            guide.append({'href': 'cover.xhtml', 'title': self.translator("navigation.cover"), 'type': 'cover'})
         book.guide = guide
 
         # 14. 保存文件
@@ -184,6 +185,7 @@ class EPUBGenerator:
 </body>
 </html>"""
             book.add_item(cover_page)
+            cover_page.is_linear = False
             self.cover_page = cover_page
 
             self.logger.info("Cover image + cover.xhtml added")
@@ -815,10 +817,13 @@ class EPUBGenerator:
         )
         STYLE_NESTED_LI = "margin: 0.2em 0;"
 
-        nav_tag_start = f'<nav epub:type="toc" id="toc">' if is_nav else '<div id="toc">'
-        nav_tag_end = '</nav>' if is_nav else '</div>'
+        nav_tag_start = f'<nav epub:type="toc" id="toc">' if is_nav else '<section id="toc" epub:type="bodymatter" style="padding: 1em;">'
+        nav_tag_end = '</nav>' if is_nav else '</section>'
 
-        body_attrs = 'style="padding: 1em;"'
+        if is_nav:
+            body_attrs = 'style="padding: 1em;"'
+        else:
+            body_attrs = 'style="padding: 1em;" epub:type="bodymatter"'
 
         content = f"""<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{self.translator.locale}" xml:lang="{self.translator.locale}">
@@ -877,12 +882,12 @@ class EPUBGenerator:
 
         if is_nav:
             content += f"""
-    <!-- EPUB 3.0 landmarks: cover -> cover.xhtml, toc -> contents.xhtml, bodymatter -> contents.xhtml -->
-    <!-- Kindle 根据此块决定"打开时跳转到哪里"，hidden 使其不在阅读器目录中显示 -->
+    <!-- EPUB 3.0 landmarks: cover -> cover.xhtml, toc -> nav.xhtml, bodymatter -> contents.xhtml -->
+    <!-- toc 指向 nav.xhtml（避免 contents.xhtml 被误判为 frontmatter 跳过），bodymatter 指向 contents.xhtml -->
     <nav epub:type=\"landmarks\" id=\"landmarks\" hidden=\"\">
         <ol>
             <li><a epub:type=\"cover\" href=\"cover.xhtml\">{self.translator('navigation.cover')}</a></li>
-            <li><a epub:type=\"toc\" href=\"contents.xhtml\">{self.translator('navigation.table_of_contents')}</a></li>
+            <li><a epub:type=\"toc\" href=\"nav.xhtml\">{self.translator('navigation.table_of_contents')}</a></li>
             <li><a epub:type=\"bodymatter\" href=\"contents.xhtml\">{self.translator('navigation.start_of_content')}</a></li>
         </ol>
     </nav>

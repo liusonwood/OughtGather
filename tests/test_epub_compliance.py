@@ -189,8 +189,8 @@ class TestEpubContent:
         # 验证 landmarks 内部包含 cover, toc 和 bodymatter 条目
         assert 'epub:type="cover" href="cover.xhtml"' in nav_html, \
             "landmarks应包含epub:type='cover'指向cover.xhtml"
-        assert 'epub:type="toc" href="contents.xhtml"' in nav_html, \
-            "landmarks应包含epub:type='toc'指向contents.xhtml"
+        assert 'epub:type="toc" href="nav.xhtml"' in nav_html, \
+            "landmarks应包含epub:type='toc'指向nav.xhtml"
         assert 'epub:type="bodymatter" href="contents.xhtml"' in nav_html, \
             "landmarks应包含epub:type='bodymatter'指向contents.xhtml（Kindle打开时落在目录页）"
         assert "{self.translator(" not in nav_html
@@ -288,13 +288,13 @@ class TestEpubSpine:
 
             return spine_items
 
-    def test_spine_starts_with_cover(self, shared_epub):
-        """测试spine以封面 (cover.xhtml) 和视觉目录 (contents.xhtml) 开始"""
+    def test_spine_starts_with_contents(self, shared_epub):
+        """测试spine以视觉目录 (contents.xhtml) 开始，封面 (cover.xhtml) 不在 spine 中（避免 Kindle 首屏落在封面）"""
         spine = self._get_spine_order(shared_epub)
-        assert spine[0] == 'cover.xhtml', f"spine应以cover.xhtml开始，实际为{spine[0]}"
-        assert spine[1] == 'contents.xhtml', f"spine第二位应为contents.xhtml，实际为{spine[1]}"
+        assert spine[0] == 'contents.xhtml', f"spine应以contents.xhtml开始，实际为{spine[0]}"
+        assert 'cover.xhtml' not in spine, f"spine不应包含cover.xhtml，实际包含：{spine}"
 
-        print(f"✓ spine以封面+目录开始")
+        print(f"✓ spine以目录开始，封面不进入spine")
 
     def test_spine_excludes_nav(self, shared_epub):
         """测试spine不包含nav.xhtml（它是非线性导航，不需要在 spine 中）"""
@@ -304,12 +304,11 @@ class TestEpubSpine:
         print(f"✓ spine不包含nav.xhtml")
 
     def test_spine_order_correct(self, shared_epub):
-        """测试spine顺序正确：cover → contents → chapters"""
+        """测试spine顺序正确：contents → chapters"""
         spine = self._get_spine_order(shared_epub)
 
         # 验证顺序
-        assert spine[0] == 'cover.xhtml', "第一位应为封面页"
-        assert spine[1] == 'contents.xhtml', "第二位应为视觉目录"
+        assert spine[0] == 'contents.xhtml', "第一位应为视觉目录"
 
         # 后续应为章节（包括divider）
         chapters_in_spine = [f for f in spine if f.startswith('chapter_')]
