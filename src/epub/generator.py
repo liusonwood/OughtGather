@@ -818,19 +818,20 @@ class EPUBGenerator:
             "font-weight: normal; font-size: 1.0em; color: #0066cc; text-decoration: none;"
         )
         STYLE_H1 = (
-            "text-align: center; font-size: 1.4em; margin-bottom: 0.5em; "
+            "text-align: center; font-size: 1.4em; margin-top: 0; margin-bottom: 0.5em; "
             "border-bottom: 2px solid #333; padding-bottom: 0.3em;"
         )
-        STYLE_OL = "list-style-type: none; margin: 0; padding: 0;"
-        STYLE_LI = "margin: 0.8em 0;"
-        STYLE_NESTED_OL = (
-            "margin-left: 1em; list-style-type: none; "
-            "border-left: 2px solid #eee; padding-left: 0.6em; margin-top: 0.4em; margin-bottom: 0.4em;"
+        
+        nav_tag_start = (
+            '<nav epub:type="toc" id="toc">' if is_nav
+            else '<section id="overview" epub:type="bodymatter">'
         )
-        STYLE_NESTED_LI = "margin: 0.2em 0;"
+        
+        if is_nav:
+            body_attrs = 'style="margin: 0; padding: 0 1em 1em;"'
+        else:
+            body_attrs = 'style="margin: 0; padding: 0 1em 1em;" epub:type="bodymatter"'
 
-        nav_tag_start = f'<nav epub:type="toc" id="toc">' if is_nav else '<section id="overview" epub:type="bodymatter" style="padding: 1em;">'
-        nav_tag_end = '</nav>' if is_nav else '</section>'
 
         if is_nav:
             body_attrs = 'style="padding: 1em;"'
@@ -1069,6 +1070,7 @@ pre code {
 
 /* 目录 (nav.xhtml) 与导读 (overview.xhtml) 专属样式 */
 #toc h1, #overview h1 {
+    margin-top: 0;
     text-align: center;
     font-size: 1.4em;
     margin-bottom: 0.5em;
