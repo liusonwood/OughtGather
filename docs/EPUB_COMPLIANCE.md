@@ -6,7 +6,7 @@
 
 - [EPUB版本与规范](#epub版本与规范)
 - [常见错误与解决方案](#常见错误与解决方案)
-- [Kindle落点问题 - 打开时随机进入正文而非目录](#kindle落点问题---打开时随机进入正文而非目录)
+- [Kindle落点问题 - 起始阅读位置（SRL）控制](#kindle落点问题---起始阅读位置srl控制)
 - [验证工具](#验证工具)
 - [最佳实践](#最佳实践)
 
@@ -394,105 +394,162 @@ for img in soup.find_all('img'):
 
 ---
 
-## Kindle落点问题 - 打开时随机进入正文而非目录
+## Kindle落点问题 - 起始阅读位置（SRL）控制
 
-**现象**：EPUB 发送到 Kindle 后，打开时有时落在目录页（nav.xhtml），有时直接跳入第一篇正文，行为不稳定。
+**现象**：EPUB 通过 Send to Kindle 推送后，首次打开的位置不稳定：有时落在目录页，有时直接跳到第一篇正文，有时跳过封面和前言。
 
-**根本原因**：Kindle 判断"首次打开落点"依赖**两套独立机制**，缺少其中任一都会导致随机行为：
+### 背景：SRL 由 Amazon 云端接管
 
-| 机制 | 格式版本 | 作用范围 |
-|------|---------|----------|
-| OPF `<guide>` 里的 `type="start"` | EPUB 2.0 兼容 | 老旧 Kindle 固件 |
-| `nav.xhtml` 里的 `epub:type="landmarks"` | EPUB 3.0 标准 | 新版固件 / Kindle App |
+Kindle 把"首次打开位置"称为 SRL（Start Reading Location，菜单里的 "Go to Beginning"）。
 
-两者都缺失时，Kindle 会根据 `<spine>` 第一个条目自行决定落点，结果不可预期。
+- **官方立场**：[KDP 导航准则](https://kdp.amazon.com/en_US/help/topic/G200141170) 允许出版方通过 guide 定义封面和目录，但明确说明起始阅读位置由 Amazon 定义。[KENPC 规则](https://kdp.amazon.com/en_US/help/topic/G201541130) 提到 Amazon 通常把 SRL 设在第 1 章。
+- **社区实测**：KDP Community 和 MobileRead 的资深排版者普遍认为，新版云端摄取管道（约 2018–2019 年起）会忽略 OPF `<guide>` 的 `type="text"` / `type="start"`，也会忽略 EPUB3 landmarks 的 `bodymatter`。过去可以靠 HTML 语义标记设置 SRL，现在不行。
+- **启发式规则**：Send to Kindle 与 KDP 共用同一套摄取核心，会做"正文探测"：
+  - 检测到 TOC/NCX：SRL 设在 TOC 之后的第一个正文页，跳过封面、版权页、献词和物理目录页等 front matter。
+  - 没有可识别的目录，或正文极短：退化为从 spine 第一项打开。
+- **自动封面页**：manifest 里有 `properties="cover-image"` 但 spine 中没有封面页时，Amazon 会在 spine 最前合成一个全屏封面页，方便向前翻到封面。这**不会**改变 SRL，合成页仍被当作 front matter 跳过。
 
----
+| 场景 | guide / landmarks 是否生效 |
+|------|-------------------------|
+| Send to Kindle / KDP 云端转制 | ❌ 基本被忽略 |
+| USB 侧载 AZW3/MOBI（如 Calibre `--start-reading-at`，写入 `<reference type="text">`） | ✅ 有效 |
+| Apple Books | ✅ 严格遵守 `bodymatter` landmark |
+| KFX | 无 OPF guide，导航和起始位置编译进内部结构，由 Amazon 算法控制 |
 
-### 修复1：OPF Guide 新增 `type="start"`
+### 旧方案为什么不稳定
 
-**问题**：之前 `book.guide` 只有 `type="toc"` 和 `type="text"`，缺少 `type="start"`。老版 Kindle 固件读取 `guide` 里的 `start` 条目来决定"打开时跳到哪"。
+旧方案让 `contents.xhtml` 同时充当 NCX 首项、`spine[0]`、guide `text`，以及 landmarks 的 `toc` 和 `bodymatter` 目标，想强行让 Kindle 落在目录页。问题有两个：
+
+1. 文件名 `contents`（以及 `toc`、`cover`、`titlepage`、`copyright` 等）是典型的 front matter 触发词，会被 Amazon 当作前言跳过，落点就滑向第一篇正文。
+2. 依赖的 guide / landmarks 在云端管道里不起作用。
+
+两者叠加，落点取决于 Amazon 的启发式判断，表现为"随机"。
+
+### 当前方案：让导读页成为"第一节正文"
+
+不再与 Amazon 对抗，而是让 Amazon 把我们想要的页面判定为正文第一页。该页命名为 `overview.xhtml`（今日导读），内容是全书目录总览，同时避开 front matter 触发词。
+
+| 措施 | 配置 | 目的 |
+|------|------|------|
+| ① NCX/TOC 首项 | `overview.xhtml` | Amazon 判定很大程度依赖"TOC 第一个有效链接目标" |
+| ② spine 首项 | `spine[0] = overview` | TOC 探测失败时的兜底落点 |
+| ③ 命名与语义 | 文件名 `overview`；`<section id="overview" epub:type="bodymatter">` | 避开触发词 |
+| ④ guide | `start` 和 `text` → `overview.xhtml`；`toc` → `nav.xhtml` | 兼容老固件和侧载，云端不保证 |
+| ⑤ landmarks | `cover` → `cover.xhtml`；`toc` 和 `bodymatter` → `overview.xhtml` | 符合 EPUB 3.3 规范 |
+| ⑥ 封面位置 | `cover.xhtml` 置于 spine **末尾**，`linear="no"` | 见下文说明 |
+
+**关于封面进 spine**：EPUB 3.3 要求 landmarks 的目标必须是 spine 中的项目（EPUBCheck 报 RSC-011）。因此 `cover.xhtml` 必须在 spine 里。放在末尾并设为非线性，既满足规范，又不影响首屏落点。
+
+**关于 landmarks 的 `toc`**：`nav.xhtml` 本身不在 spine 中，所以 landmarks 的 `toc` 不能指向它，改为指向 `overview.xhtml`；而 guide 的 `toc` 仍指向 `nav.xhtml`（OPF guide 不受 spine 限制）。
+
+#### 生成器实现
 
 ```python
-# 错误配置：缺少 type="start"
-book.guide = [
-    {'href': 'nav.xhtml', 'title': 'Table of Contents', 'type': 'toc'},
-    {'href': 'cover.xhtml', 'title': 'Cover', 'type': 'cover'},
-    {'href': 'nav.xhtml', 'title': 'Table of Contents', 'type': 'text'},
-]
+# 1. NCX/TOC 首项设为 overview.xhtml
+book.toc = self.toc_generator.generate(sections)
+book.toc.insert(0, epub.Link("overview.xhtml",
+                             self.translator("navigation.overview"), "overview"))
 
-# 修复后的配置：新增 type="start" 指向目录页
-book.guide = [
-    {'href': 'nav.xhtml', 'title': 'Table of Contents', 'type': 'toc'},
-    {'href': 'cover.xhtml', 'title': 'Cover', 'type': 'cover'},
-    {'href': 'nav.xhtml', 'title': 'Table of Contents', 'type': 'text'},
-    {'href': 'nav.xhtml', 'title': 'Start', 'type': 'start'},  # 新增
+# 2. 生成导读页（复用目录渲染逻辑，is_nav=False）
+overview = epub.EpubHtml(
+    title=self.translator("navigation.overview"),
+    file_name='overview.xhtml',
+    uid='overview',
+    lang=self.translator.locale,
+)
+overview.content = self._generate_nav_content(book.title, book.toc, is_nav=False)
+overview.add_link(href='style/default.css', rel='stylesheet')
+book.add_item(overview)
+
+# 3. spine：overview 在首位，cover 非线性置于末尾
+book.spine.insert(0, overview)
+if self.cover_page is not None and self.cover_page not in book.spine:
+    self.cover_page.is_linear = False
+    book.spine.append(self.cover_page)
+
+# 4. guide
+guide = [
+    {'href': 'overview.xhtml', 'title': self.translator("navigation.overview"), 'type': 'start'},
+    {'href': 'overview.xhtml', 'title': self.translator("navigation.start_of_content"), 'type': 'text'},
+    {'href': 'nav.xhtml', 'title': self.translator("navigation.table_of_contents"), 'type': 'toc'},
 ]
+if self.cover_page is not None:
+    guide.append({'href': 'cover.xhtml', 'title': self.translator("navigation.cover"), 'type': 'cover'})
 ```
 
----
-
-### 修复2：`nav.xhtml` 新增 `epub:type="landmarks"` 导航块
-
-**问题**：EPUB 3.0 规范规定，`nav.xhtml` 应包含 `epub:type="landmarks"` 导航块来声明书籍各部分的语义起始位置。Kindle 新固件和 App 优先读取此块来决定"正文从哪里开始"。之前的实现只有 `epub:type="toc"` 块，缺少 landmarks。
+#### nav.xhtml 的 landmarks
 
 ```xml
-<!-- 错误：只有 toc nav，无 landmarks -->
-<nav epub:type="toc" id="toc">
-    ...
-</nav>
-</body>
-
-<!-- 修复后：toc nav 后面追加 landmarks nav -->
-<nav epub:type="toc" id="toc">
-    ...
-</nav>
-
-<!-- EPUB 3.0 landmarks: cover -> cover.xhtml, toc + bodymatter 均指向 contents.xhtml -->
-<!-- Kindle 根据此块决定"打开时跳转到哪里"，hidden 使其不在阅读器目录中显示 -->
+<!-- 所有 landmarks 目标必须是 spine 中的项目（EPUB 3.3 / RSC-011） -->
 <nav epub:type="landmarks" id="landmarks" hidden="">
     <ol>
-        <li><a epub:type="cover" href="cover.xhtml">Cover / 封面</a></li>
-        <li><a epub:type="toc" href="contents.xhtml">Table of Contents / 目录</a></li>
-        <li><a epub:type="bodymatter" href="contents.xhtml">Start of Content / 开始阅读</a></li>
+        <li><a epub:type="cover" href="cover.xhtml">封面</a></li>
+        <li><a epub:type="toc" href="overview.xhtml">目录</a></li>
+        <li><a epub:type="bodymatter" href="overview.xhtml">今日导读</a></li>
     </ol>
 </nav>
 ```
 
-**关键设计决策**：
-- `epub:type="bodymatter"` 和 `epub:type="toc"` 指向 `contents.xhtml`（而非非线性未入 spine 的 `nav.xhtml`），符合 EPUB 3.0 / 3.3 规范（landmarks 内资源必须属于 spine item），同时让 Kindle 认为"正文起始 = 目录页"。
-- `hidden=""` 是 EPUB 3.0 规范要求的属性，表示此导航块不在阅读器 UI 的目录列表中展示，但仍被解析器读取生效。
-- 两个 landmark 都指向同一个物理目录页文件，确保无论 Kindle 读哪个 landmark 都落在目录。
+#### 联动修改
 
----
+- **导读页容器**：`is_nav=False` 时输出 `<section id="overview" epub:type="bodymatter" ...>`，旧版是 `id="toc"`。
+- **隐藏自引用**：部分 Kindle 版本会扫描物理页中的自引用来识别目录入口，因此保留该链接并隐藏（`aria-hidden="true" tabindex="-1"`，包裹元素 `id="toc_overview"` 设为 `display: none`）。`nav.xhtml` 中仍正常显示。判断条件由 `item.href == 'contents.xhtml'` 改为 `'overview.xhtml'`。
+- **返回链接**：`generate_toc_link()` 生成的"返回目录"改为 `overview.xhtml#{target_id}`，章节分隔页同步受影响。
+- **CSS**：`#toc` 的全部选择器追加 `#overview` 同款规则，例如 `#toc h1, #overview h1 { ... }`。
+- **文案**：locale 新增键 `navigation.overview`（zh-CN：`今日导读`；en-US：`Daily Digest`）。
+
+#### 回归测试要点
+
+- NCX 首个 `navPoint/content` 的 `src` 等于 `overview.xhtml`。
+- spine 首项为 `overview.xhtml`，末项为 `cover.xhtml`，且不含 `nav.xhtml`。
+- OPF guide 同时含 `cover`、`toc`（→ `nav.xhtml`）、`text` 和 `start`（→ `overview.xhtml`）。
+- landmarks 含 `cover`、`toc`、`bodymatter`，且 `toc` 和 `bodymatter` 都指向 `overview.xhtml`。
+- 导读页含隐藏自引用：`href="overview.xhtml" aria-hidden="true" tabindex="-1"` 以及 `id="toc_overview" style="display: none;"`。
+- `generate_toc_link()` 和分隔页的返回链接均为 `overview.xhtml#...`。
 
 ### 验证方法
 
 ```bash
-# 解压并检查 nav.xhtml 是否包含 landmarks 块
-unzip -p your_epub.epub EPUB/nav.xhtml | grep -A 8 'landmarks'
+# guide：start / text → overview.xhtml，toc → nav.xhtml
+unzip -p your_epub.epub EPUB/content.opf | grep -E 'type="(start|text|toc)"'
 
-# 检查 OPF 中的 guide 是否包含 type="start"
-unzip -p your_epub.epub EPUB/content.opf | grep 'type="start"'
+# NCX 首项应为 overview.xhtml
+unzip -p your_epub.epub EPUB/toc.ncx | grep -m1 '<content'
+
+# spine 首项应为 overview，末项应为 cover 且 linear="no"
+unzip -p your_epub.epub EPUB/content.opf | grep -o '<itemref[^>]*>' | sed -n '1p;$p'
+
+# landmarks
+unzip -p your_epub.epub EPUB/nav.xhtml | grep -A 6 'landmarks'
 ```
 
-预期输出（nav.xhtml）：
+预期输出：
 
 ```xml
-<nav epub:type="landmarks" id="landmarks" hidden="">
-    <ol>
-        <li><a epub:type="cover" href="cover.xhtml">Cover / 封面</a></li>
-        <li><a epub:type="toc" href="contents.xhtml">Table of Contents / 目录</a></li>
-        <li><a epub:type="bodymatter" href="contents.xhtml">Start of Content / 开始阅读</a></li>
-    </ol>
-</nav>
+<reference href="overview.xhtml" title="今日导读" type="start"/>
+<content src="overview.xhtml"/>
+<itemref idref="overview"/>
+<itemref idref="cover" linear="no"/>
 ```
 
-预期输出（content.opf）：
+### 其他强制落点手段（备查）
 
-```xml
-<reference href="nav.xhtml" title="Start" type="start"/>
-```
+如果希望首次打开落在封面或前言，社区已知的做法有：
+
+1. **最有效**：在逻辑 TOC（NCX 和 Nav）中把封面作为第一个条目。
+2. 不放独立的 HTML 目录页，只保留 NCX/nav，并把前言、扉页与第一章合并到同一个 xhtml 中。文件名和 class 避免使用 `titlepage`、`copyright`、`cover` 等触发词。
+
+### 注意
+
+Amazon 不公开 SRL 算法，以上结论来自官方文档、社区实测和本项目的实际验证。固件或云端管道更新后行为可能变化，改动落点相关配置后务必用真机或 Send to Kindle 实测。
+
+相关讨论：
+
+- [KDP Community: Start Reading Location](https://www.kdpcommunity.com/s/question/0D5f400000GA15dCAD/start-reading-location)
+- [MobileRead: Cover in TOC?](https://www.mobileread.com/forums/showthread.php?t=264024)
+- [Reddit r/kindle: Kindle books skip front matter](https://www.reddit.com/r/kindle/comments/h9wsqy/its_really_frustrating_that_kindle_books_skip_all/)
+- [calibre ebook-convert 手册](https://manual.calibre-ebook.com/generated/en/ebook-convert.html)
+- [KFX Output 插件（MobileRead）](https://www.mobileread.com/forums/showthread.php?t=272407)
 
 ## Kindle推送失败与内容错误排查
 
@@ -680,6 +737,7 @@ EPUBCheck completed
 | RSC-016 | XHTML文件解析失败（文件为空） | Fatal | cover.xhtml |
 | RSC-026 | URL路径泄露到容器外部（绝对路径） | Error | 所有文件 |
 | RSC-007 | 引用的资源未找到 | Error | content.opf |
+| RSC-011 | landmarks/链接目标不在 spine 中 | Error | nav.xhtml（landmarks） |
 | OPF-031 | guide元素引用未声明的文件 | Error | content.opf |
 | HTM-010 | HTML属性值无效（小数点等） | Error | chapter_x.xhtml |
 
@@ -757,13 +815,13 @@ book.add_author('Author Name')
 book.add_item(epub.EpubNcx())  # NCX导航
 book.add_item(epub.EpubNav())  # Nav Document（必需）
 
-# Guide元素（兼容性 + Kindle落点控制）
+# Guide元素：start/text 指向 overview.xhtml（侧载和老固件有效；
+# Send to Kindle 云端会忽略，真正起作用的是 NCX 首项 + spine[0]，见"Kindle落点问题"）
 book.guide = [
+    {'href': 'overview.xhtml', 'title': 'Daily Digest', 'type': 'start'},
+    {'href': 'overview.xhtml', 'title': 'Start of Content', 'type': 'text'},
     {'href': 'nav.xhtml', 'title': 'Table of Contents', 'type': 'toc'},
     {'href': 'cover.xhtml', 'title': 'Cover', 'type': 'cover'},
-    {'href': 'nav.xhtml', 'title': 'Table of Contents', 'type': 'text'},
-    # type="start"：Kindle 专认的"打开时跳转到"标志
-    {'href': 'nav.xhtml', 'title': 'Start', 'type': 'start'},
 ]
 
 # 不修改FOLDER_NAME，保留默认 'EPUB'
@@ -864,6 +922,9 @@ unzip -p your_epub.epub EPUB/content.opf
 - 确认 `version="3.0"`（无法改为2.0）
 - 确认manifest中有 `properties="nav"` 的item
 - 确认所有XHTML文件都在manifest中声明
+- 确认 guide 含 `type="start"` 和 `type="text"`，均指向 `overview.xhtml`
+- 确认 `<spine>` 首项为 overview，`cover` 在末尾且 `linear="no"`
+- 确认 `toc.ncx` 首个 `navPoint` 指向 `overview.xhtml`
 
 ### Step 3: 检查XHTML文件
 ```bash
@@ -888,6 +949,13 @@ cat report.json
 - [ebooklib GitHub](https://github.com/aerkalov/ebooklib) - Python库源码
 - [EPUB最佳实践](https://github.com/IDPF/epub3-samples) - 官方示例文件
 - [Kindle-Previewer下载](https://www.amazon.com/Kindle-Previewer/b?node=21381691011) - 官方验证工具
+- [KDP Navigation Guidelines](https://kdp.amazon.com/en_US/help/topic/G200141170) - 官方：SRL 由 Amazon 定义
+- [KDP 版税规则（KENPC / SRL）](https://kdp.amazon.com/en_US/help/topic/G201541130) - SRL 通常设在第 1 章
+- [KDP Community: Start Reading Location](https://www.kdpcommunity.com/s/question/0D5f400000GA15dCAD/start-reading-location) - 社区实测
+- [MobileRead: Cover in TOC?](https://www.mobileread.com/forums/showthread.php?t=264024) - 强制 SRL 讨论
+- [calibre ebook-convert 手册](https://manual.calibre-ebook.com/generated/en/ebook-convert.html) - `--start-reading-at`
+- [KFX Output 插件（MobileRead）](https://www.mobileread.com/forums/showthread.php?t=272407) - KFX 的 SRL 机制
+- [OughtGather commit 484d122](https://github.com/liusonwood/OughtGather/commit/484d122a434187714ef64c7ed4d1730c1c4fd270) - 落点修复实现
 
 ---
 
@@ -904,7 +972,7 @@ cat report.json
 7. ✅ **取整图片属性** - `width` 和 `height` 必须是整数
 8. ✅ **修复嵌套结构** - `<p>` 内不能有块级元素
 9. ✅ **验证EPUB文件** - 使用EPUBCheck确保合规
-10. ✅ **Kindle落点控制** - OPF guide 加 `type="start"` + nav.xhtml 加 `epub:type="landmarks"` 块，确保打开时总是进入目录
+10. ✅ **Kindle落点控制** - SRL 由 Amazon 云端启发式决定，guide/landmarks 在 Send to Kindle 中基本被忽略；以 `overview.xhtml`（避开 contents/toc/cover 等 front matter 触发词）作为首节正文：NCX 首项 + `spine[0]` 同时指向它，guide/landmarks 同步对齐，`cover.xhtml` 置于 spine 末尾并设 `linear="no"`
 11. ✅ **清理图片描述中的特殊字符** - 清理 `alt` / `title` 属性中的 `<` / `>` 防止 Kindle Previewer 报错 (E21018)
 
 ### 验证成功的标志
