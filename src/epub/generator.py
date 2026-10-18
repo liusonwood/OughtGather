@@ -795,7 +795,7 @@ class EPUBGenerator:
         from ebooklib import epub as epub_lib
         safe_title = html.escape(book_title)
         rendered_book_title = ContentProcessor.render_text_with_emojis(book_title)
-
+        
         # 内联样式（作为 Kindle 兜底）：
         # EPUB 3.3 规范禁止 <style> 出现在 nav 文档的 <body> 中（EPUBCheck RSC-005），
         # 因此改用 inline style 属性，所有阅读器（含 Kindle）都能正确渲染，
@@ -818,7 +818,7 @@ class EPUBGenerator:
             "font-weight: normal; font-size: 1.0em; color: #0066cc; text-decoration: none;"
         )
         STYLE_H1 = (
-            "text-align: center; font-size: 1.4em; margin-top: 0; margin-bottom: 0.5em; "
+            "text-align: center; font-size: 1.4em; margin-bottom: 0.5em; "
             "border-bottom: 2px solid #333; padding-bottom: 0.3em;"
         )
         STYLE_OL = "list-style-type: none; margin: 0; padding: 0;"
@@ -829,16 +829,13 @@ class EPUBGenerator:
         )
         STYLE_NESTED_LI = "margin: 0.2em 0;"
 
-        nav_tag_start = (
-            '<nav epub:type="toc" id="toc">' if is_nav
-            else '<section id="overview" epub:type="bodymatter">'
-        )
-        nav_tag_end = '</nav>' if is_nav else '</section>'
+        nav_tag_start = f'<nav epub:type="toc" id="toc">' if is_nav else '<div id="overview" epub:type="bodymatter">'
+        nav_tag_end = '</nav>' if is_nav else '</div>'
 
         if is_nav:
-            body_attrs = 'style="margin: 0; padding: 0 1em 1em;"'
+            body_attrs = 'style="padding: 1em;"'
         else:
-            body_attrs = 'style="margin: 0; padding: 0 1em 1em;" epub:type="bodymatter"'
+            body_attrs = 'style="padding: 1em;" epub:type="bodymatter"'
 
         content = f"""<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{self.translator.locale}" xml:lang="{self.translator.locale}">
@@ -911,7 +908,6 @@ class EPUBGenerator:
         content += """</body>
 </html>"""
         return content
-
 
     def _add_rendered_emojis(self, book: epub.EpubBook, unique_emojis: set):
         """渲染并添加 Emoji 图片"""
@@ -1073,7 +1069,6 @@ pre code {
 
 /* 目录 (nav.xhtml) 与导读 (overview.xhtml) 专属样式 */
 #toc h1, #overview h1 {
-    margin-top: 0;
     text-align: center;
     font-size: 1.4em;
     margin-bottom: 0.5em;
