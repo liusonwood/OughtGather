@@ -85,6 +85,10 @@ Actions -> Daily Gather -> Run workflow
 
 通过 Cloudflare Workers 定时触发 GitHub Actions，触发时间比 GitHub 自带的 `schedule` 更精准（误差通常在 1 分钟以内）。`schedule` 保留为保底备用，且会在外部触发后 12 小时内自动跳过，避免重复执行。
 
+### 修改时区
+
+修改工作流文件 [.github/workflows/daily-gather.yml](.github/workflows/daily-gather.yml)中 `TZ: Asia/Shanghai` 字段。影响epub中显示的文章时间。
+
 #### 配置外部触发器（推荐）
 
 **第一步：修改运行时间代码**
@@ -128,7 +132,7 @@ on:
   workflow_dispatch:
 ```
 
-> **注意**：工作流里的 `TZ: Asia/Shanghai` 只影响程序内部的日期和日志，不影响 cron 触发时间。实际触发时间以 GitHub Actions 运行记录为准，可能与 cron 语义有偏差。
+> **注意**：工作流里的 `TZ: Asia/Shanghai` 影响epub文件文章日期，程序内部的日期和日志，不影响 cron 触发时间。实际触发时间以 GitHub Actions 运行记录为准，可能与 cron 语义有偏差。
 
 ### 去重缓存机制（无需开启写入权限）
 
@@ -153,6 +157,11 @@ on:
 ## Secrets 配置
 
 在 GitHub 仓库的 `Settings -> Secrets and variables -> Actions` 中配置，本地开发时通过环境变量设置。
+
+> [!CAUTION]
+> **不要直接修改仓库里的 `config.json`！**
+> Fork 的仓库默认公开，里面的私有 RSS 链接、邮箱、API Key 会被所有人看到。
+> 请在 `Settings -> Secrets` 中添加 `CONFIG_JSON`，并同步上游更新时也不会冲突。
 
 ### 必要变量
 
