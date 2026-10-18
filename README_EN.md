@@ -85,6 +85,10 @@ See the [Secrets Configuration](#secrets-configuration) section below to configu
 
 We recommend triggering the workflow via Cloudflare Workers for precise cron executions (typically within 1 minute accuracy). The built-in GitHub Actions `schedule` serves as a fallback and automatically skips itself if an external run happened within the previous 12 hours to prevent duplicate deliveries.
 
+### Change Time Zone
+
+Edit the `TZ: Asia/Shanghai` field in the workflow file [.github/workflows/daily-gather.yml](.github/workflows/daily-gather.yml). This affects the article times shown in the EPUB.
+
 #### Configure External Trigger (Recommended)
 
 **Step 1: Modify Trigger Cron**
@@ -128,7 +132,7 @@ on:
   workflow_dispatch:
 ```
 
-> **Note**: The environment variable `TZ: Asia/Shanghai` inside the workflow only dictates the internal time calculations and log timestamps; it does not change the cron scheduler's UTC-based execution. Actual execution times depend on GitHub Actions queue states.
+> **Note**: `TZ: Asia/Shanghai` in the workflow affects the article dates in the EPUB file as well as dates and logs inside the program, but not the cron trigger time. The actual trigger time is subject to the GitHub Actions run history and may deviate from the cron semantics.
 
 ### Deduplication Cache Mechanism (Zero Write Permissions Required)
 
@@ -153,6 +157,11 @@ By leveraging the `actions/cache` mechanism, the deduplication tracker data (`da
 ## Secrets Configuration
 
 Configure these in your GitHub repository under `Settings -> Secrets and variables -> Actions`. For local development, set them as environment variables.
+
+> [!CAUTION]
+> **Do not edit the `config.json` in the repository directly!**
+> Forked repositories are public by default, so any private RSS links, email addresses, and API keys in it will be visible to everyone.
+> Add a `CONFIG_JSON` secret under `Settings -> Secrets` instead. This also avoids merge conflicts when you sync updates from upstream.
 
 ### Required Variables
 
